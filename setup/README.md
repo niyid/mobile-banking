@@ -25,7 +25,8 @@ Every stage is also a standalone script and is safe to re-run.
 | 20 | `20-setup-phone-gateway.sh` | Pairs the phone via adb, asks for the phone app's credentials, writes `~/.cyclos/phone-gateway.env` |
 | 25 | `25-setup-bridge-venv.sh` | Python venv for the bridge (rebuilt automatically if the folder was moved) |
 | 30 | `30-install-bridge-service.sh` | Installs/starts the `cyclos-bridge` systemd service with the correct paths |
-| 35 | `35-verify-sms-wiring.sh` | Reports whether SMS is actually wired end-to-end (bridge config + Cyclos admin-UI steps below). Never fails the run - the admin-UI step is normally still pending after a first run. Safe to re-run any time. |
+| 35 | `35-verify-sms-wiring.sh` | Reports whether SMS is actually wired end-to-end: bridge config, plus a direct read of Cyclos's own `sms_enabled`/`sms_gateway_url` DB columns when reachable. Never fails the run - normally still pending after a first run. Safe to re-run any time. |
+| 36 | `36-configure-cyclos-sms.sh` | Optional, not run by `run-all.sh`. Sets the outbound SMS gateway directly on Cyclos's `configurations` table and restarts Tomcat - see "Wiring SMS into Cyclos" for what it does and doesn't cover. |
 | 40 | `40-install-kannel.sh` | Optional. Kannel is not needed for Cyclos 4 |
 | 50 | `git-init-commit.sh` | Commits scripts/templates (never `~/.cyclos`) into `~/git/mobile-banking` |
 
@@ -43,28 +44,56 @@ Helpers: `cyclosctl.sh start|stop|restart|status|logs` (Tomcat) and `phone-tunne
 
 ## Wiring SMS into Cyclos
 
-**This step is not automated, and finishing `run-all.sh` does not mean it's done.** Cyclos 4 has its
-own SMS channel, and the bridge is built to plug into it, but Cyclos does not expose any API for
-configuring that channel - only the admin UI does (confirmed against Cyclos's own web-services
-reference, which explicitly documents "SMS operation" as a channel a gateway calls, not something
-a REST client can configure). So stages 00-30 only get the bridge and the phone ready; the Cyclos
-side below always has to be done by hand, and it's easy to skip without noticing since nothing
-about the earlier stages fails if you do. Run `./35-verify-sms-wiring.sh` any time to check the
-current status instead of assuming it from a clean `run-all.sh` run.
+**Finishing `run-all.sh` does not by itself mean this is done** - stages 00-30 only get the
+bridge and the phone ready. Cyclos does not expose a REST *API* for configuring the SMS
+channel (system-management settings are explicitly excluded from the REST API per Cyclos's
+own web-services reference), so there's no supported way to script it end-to-end. But two
+things from that same reference doc are worth knowing, because they let most of this be
+checked - and the outbound half even set - without touching the admin UI:
 
-1. Admin: *System management > System configuration > Configurations* > your configuration > *Channels* > **SMS**: enable it.
-2. **Outbound** - set the gateway URL to the bridge, using the recipient/message variables that Cyclos lists next to that field:
-   `http://127.0.0.1:5000/cgi-bin/sendsms?username=cyclos&password=<SENDSMS_PASS>&to=<recipient variable>&text=<message variable>`
-   `SENDSMS_PASS` is in `~/.cyclos/phone-gateway.env` (generated during stage 20).
-3. **Inbound** - Cyclos displays an **Inbound SMS URL** on that page. Put it in `~/.cyclos/phone-gateway.env` as `CYCLOS_SMS_RECEIVE_URL=...`, then `sudo systemctl restart cyclos-bridge`. If Cyclos expects other parameter names or GET, set `CYCLOS_SMS_FROM_PARAM`, `CYCLOS_SMS_TEXT_PARAM`, `CYCLOS_SMS_METHOD` in the same file.
-4. Verify: `./35-verify-sms-wiring.sh` checks the bridge is ready on both ends (send password set, inbound URL copied in from step 3) and prints the exact outbound URL and admin-UI path for steps 1-2 as a reminder. It cannot see into the Cyclos UI itself, so a clean result there still isn't proof steps 1-2 were actually done in Cyclos - only that the bridge side is ready for them. Once it's green, send a real test message to the gateway phone number and watch `sudo journalctl -u cyclos-bridge -f`; the admin "SMS messages" overview in Cyclos also shows send/receive status.
+* The channel's settings live in plain columns on the `configurations` table
+  (`sms_enabled`, `sms_gateway_url`, `sms_username`, `sms_password`, `sms_headers`) - visible
+  in the doc's own example for scrubbing secrets before sharing a DB dump, which nulls out
+  exactly these columns. That's an undocumented implementation detail, not a supported API,
+  but it's real and it's how `./36-configure-cyclos-sms.sh` (new, optional) sets the outbound
+  side directly, then restarts Tomcat so Cyclos reloads it.
+* Cyclos's *default* outbound sender authenticates with **HTTP Basic Auth**, not Kannel-style
+  `?username=..&password=..` query params - the scripting reference's own outbound-SMS example
+  scripts read `configuration.outboundSmsConfiguration` and call
+  `headers.setBasicAuth(user, pwd)`. `bridge.py` now accepts both, so it works either way.
+
+What's still genuinely unconfirmed against a live 4.16.20: the exact placeholder syntax Cyclos
+substitutes into the gateway URL for the phone number/message (`36-configure-cyclos-sms.sh`
+guesses `{phoneNumber}` / `{message}`, matching the scripting reference's bound-variable names,
+but the admin UI's own field labels are the source of truth), whether per-user "channel access"
+or per-phone "SMS enabled" flags also need setting, and the Inbound SMS URL - there's no
+matching column in `configurations`, so it looks like a fixed/computed endpoint rather than
+something to write, and it still has to be copied from the UI by hand.
+
+1. **Outbound** - either run `./36-configure-cyclos-sms.sh` (writes `sms_enabled`/
+   `sms_gateway_url`/`sms_username`/`sms_password` directly and restarts Tomcat), or do it by
+   hand: Admin *System management > System configuration > Configurations* > your
+   configuration > *Channels* > **SMS** > enable it, and set the gateway URL to
+   `http://127.0.0.1:5000/cgi-bin/sendsms?to=<recipient variable>&text=<message variable>`
+   using whatever placeholder syntax that field actually shows. Either way, check the field
+   afterwards - if the placeholder syntax turns out to differ, fix it there.
+2. **Inbound** - Cyclos displays an **Inbound SMS URL** on that same page. Put it in
+   `~/.cyclos/phone-gateway.env` as `CYCLOS_SMS_RECEIVE_URL=...`, then
+   `sudo systemctl restart cyclos-bridge`. If Cyclos expects other parameter names or GET, set
+   `CYCLOS_SMS_FROM_PARAM`, `CYCLOS_SMS_TEXT_PARAM`, `CYCLOS_SMS_METHOD` in the same file.
+3. Verify: `./35-verify-sms-wiring.sh` now reads `sms_enabled`/`sms_gateway_url` back from the
+   database directly (when it can reach it) instead of just telling you to go check by hand,
+   plus the bridge-side checks from before. Once it's green, send a real test message to the
+   gateway phone number and watch `sudo journalctl -u cyclos-bridge -f`; the admin "SMS
+   messages" overview in Cyclos also shows send/receive status.
 
 ## Security notes
 
 * The bridge listens on **127.0.0.1 only** and refuses to send unless `SENDSMS_PASS` is set (earlier versions defaulted to `changeme` and listened on all interfaces).
 * SMS text is never written to the bridge log (it can contain PINs). Phone numbers are masked.
 * Secrets live in `~/.cyclos/` (mode 700/600) and are excluded from the git commit.
-* The password in the Cyclos outbound URL will appear in Cyclos's own logs; this is local-only traffic, but rotate `SENDSMS_PASS` if the machine is shared.
+* If Cyclos ends up sending the password in the outbound URL's query string rather than as HTTP Basic Auth (worth checking once it's wired up), it will appear in Cyclos's own logs; this is local-only traffic either way, but rotate `SENDSMS_PASS` if the machine is shared.
+* `36-configure-cyclos-sms.sh` writes straight to Cyclos's `configurations` table over the same DB role `10-install-cyclos.sh` created - not a documented API, just the same schema Cyclos's own docs use to scrub these columns before sharing a DB dump. Read it before running it.
 
 ## Things this does not do
 

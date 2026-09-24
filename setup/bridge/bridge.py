@@ -100,13 +100,27 @@ def send_via_phone(to: str, text: str) -> None:
 
 @app.route("/cgi-bin/sendsms", methods=["GET", "POST"])
 def sendsms():
-    """Kannel-style sendsms endpoint: ?username=..&password=..&to=..&text=.."""
+    """Kannel-style sendsms endpoint: ?username=..&password=..&to=..&text=..
+
+    Also accepts the credentials as HTTP Basic Auth instead of query params: Cyclos's
+    built-in GatewaySmsSender authenticates via applyAuthentication(), and the scripting
+    reference's own outbound-SMS examples read configuration.outboundSmsConfiguration and
+    call headers.setBasicAuth(user, pwd) - i.e. Cyclos's default (non-scripted) sender is
+    HTTP Basic Auth, not Kannel-style query params. Accepting both means this endpoint works
+    whichever way Cyclos (or a manual curl test) actually sends it.
+    """
     if not SENDSMS_PASS:
         log.error("SENDSMS_PASS is not set in %s - refusing to send", ENV_FILE)
         return Response("Bridge not configured: SENDSMS_PASS missing", status=500)
 
     args = request.values
-    if not (same(args.get("username", ""), SENDSMS_USER) and same(args.get("password", ""), SENDSMS_PASS)):
+    auth = request.authorization
+    authorized = (
+        same(args.get("username", ""), SENDSMS_USER) and same(args.get("password", ""), SENDSMS_PASS)
+    ) or (
+        auth is not None and same(auth.username or "", SENDSMS_USER) and same(auth.password or "", SENDSMS_PASS)
+    )
+    if not authorized:
         return Response("Authorization failed", status=403)
 
     raw_to = args.get("to") or ""
