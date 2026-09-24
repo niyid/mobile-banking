@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable</title>
+
+<!-- SEO -->
+<meta name="description" content="In 2013 it took months to model mobile banking with Cyclos and Kannel, using an Etisalat MiFi USB adapter as the radio. In 2026 the same idea is rebuilt in about a day with Claude: Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and eleven re-runnable scripts. Includes the log4j error that wasn't a missing jar, and what still isn't wired up.">
+<meta name="author" content="niyid">
+<meta name="keywords" content="Cyclos, Kannel, mobile banking, SMS banking, SMS gateway, Android, Tomcat, PostgreSQL, PostGIS, Claude, Techducat">
+
+<!-- Open Graph -->
+<meta property="og:type" content="article">
+<meta property="og:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
+<meta property="og:description" content="A 2013 mobile-banking lab (Cyclos + Kannel + a MiFi modem) rebuilt in about a day with Claude: Cyclos 4.16, an Android phone as SMS gateway, and a small bridge. What was built, what broke, and what still isn't finished.">
+<meta property="og:url" content="https://niyid.github.io/mobile-banking/linked-in-article.html">
+<meta property="og:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
+<meta property="og:image:width" content="1998">
+<meta property="og:image:height" content="787">
+<meta property="og:image:alt" content="A hand holding a phone showing a mobile-banking app, between a Cyclos server and a Kannel SMS gateway.">
+<meta property="og:site_name" content="Techducat">
+<meta property="article:author" content="https://github.com/niyid">
+<meta property="article:published_time" content="2026-09-24">
+
+<!-- Twitter/X Card -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
+<meta name="twitter:description" content="Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and the log4j error that turned out not to be a missing jar.">
+<meta name="twitter:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
+
+<!-- Canonical -->
+<link rel="canonical" href="https://niyid.github.io/mobile-banking/linked-in-article.html">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=DM+Sans:wght@300;400;500&family=IBM+Plex+Mono:wght@400;600&display=swap');
+
+  :root {
+    --bg:           #080907;
+    --surface:      #0d100c;
+    --panel:        #12160f;
+    --border:       #22271d;
+    --border-hi:    #3a4230;
+    --gold:         #d9a441;
+    --gold-dim:     rgba(217,164,65,0.14);
+    --sea:          #2f7a82;
+    --sea-dim:      rgba(47,122,130,0.14);
+    --forest:       #4a8f63;
+    --forest-dim:   rgba(74,143,99,0.14);
+    --red:          #b3402b;
+    --red-dim:      rgba(179,64,43,0.14);
+    --violet:       #8a76c9;
+    --text:         #e9e4d6;
+    --muted:        #7c8577;
+    --muted-hi:     #b3ae9c;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 300;
+    line-height: 1.75;
+    overflow-x: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.5;
+  }
+
+  body::after {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(217,164,65,0.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(217,164,65,0.02) 1px, transparent 1px);
+    background-size: 60px 60px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+
+  a { color: var(--gold); text-underline-offset: 3px; }
+  a:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; border-radius: 3px; }
+
+  .hero { padding: 80px 0 64px; border-bottom: 1px solid var(--border); margin-bottom: 64px; position: relative; }
+
+  .hero-eyebrow {
+    display: inline-flex; align-items: center; gap: 10px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.18em;
+    text-transform: uppercase; color: var(--gold); margin-bottom: 28px;
+  }
+  .hero-eyebrow::before { content: ''; display: block; width: 32px; height: 1px; background: var(--gold); }
+
+  .hero h1 {
+    font-family: 'Playfair Display', serif; font-weight: 900; font-size: 52px; line-height: 1.08;
+    letter-spacing: -0.01em; margin-bottom: 28px;
+  }
+  .hero h1 .italic { font-style: italic; font-weight: 700; }
+  .hero h1 .accent { color: var(--gold); }
+  .hero h1 .sea-accent { color: var(--sea); }
+
+  .hero-meta { display: flex; flex-wrap: wrap; gap: 10px 0; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); margin-bottom: 28px; }
+  .hero-meta .sep { margin: 0 12px; color: var(--border-hi); }
+
+  .hero-lead { font-size: 18px; color: var(--muted-hi); max-width: 700px; }
+  .hero-lead code { font-family: 'IBM Plex Mono', monospace; font-size: 0.85em; background: var(--panel); padding: 2px 6px; border-radius: 4px; color: var(--gold); }
+
+  section { margin-bottom: 56px; }
+  .section-kicker {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 10px; display: flex; align-items: center; gap: 10px;
+  }
+  .section-kicker.sea { color: var(--sea); }
+  .section-kicker.forest { color: var(--forest); }
+  .section-kicker.red { color: #e2857a; }
+  .section-kicker::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  h2 { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 30px; margin-bottom: 18px; line-height: 1.25; }
+  h3 { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 21px; margin: 36px 0 14px; color: var(--muted-hi); }
+
+  p { margin-bottom: 16px; color: var(--text); }
+  p code, li code, td code { font-family: 'IBM Plex Mono', monospace; font-size: 0.87em; background: var(--panel); padding: 2px 6px; border-radius: 4px; color: var(--gold); border: 1px solid var(--border); overflow-wrap: anywhere; }
+  code { font-family: 'IBM Plex Mono', monospace; }
+
+  /* code blocks */
+  section ul { margin: 0 0 16px 22px; color: var(--text); }
+  section li { margin-bottom: 6px; }
+
+  pre {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 20px; margin: 20px 0 24px; overflow-x: auto;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; line-height: 1.7; color: var(--muted-hi);
+  }
+  pre .c { color: var(--muted); }
+  pre .k { color: var(--gold); }
+
+  .callout { border: 1px solid var(--border); border-radius: 10px; padding: 20px 22px; margin: 24px 0; display: flex; gap: 16px; }
+  .callout-icon { font-size: 20px; line-height: 1.4; }
+  .callout-body > strong { display: block; margin-bottom: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text); }
+  .callout-body p { font-size: 14px; color: var(--muted-hi); margin: 0 0 10px; }
+  .callout-body p:last-child { margin-bottom: 0; }
+  .callout-info { background: var(--sea-dim); border-color: rgba(47,122,130,0.35); }
+  .callout-info .callout-body > strong { color: var(--sea); }
+  .callout-warn { background: var(--red-dim); border-color: rgba(179,64,43,0.35); }
+  .callout-warn .callout-body > strong { color: #e2857a; }
+  .callout-good { background: var(--forest-dim); border-color: rgba(74,143,99,0.35); }
+  .callout-good .callout-body > strong { color: var(--forest); }
+
+  .compare-cards { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 24px 0; }
+  .compare-header { display: grid; grid-template-columns: 110px 1fr 1fr; background: var(--panel); }
+  .compare-header-cell { padding: 12px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .compare-row { display: grid; grid-template-columns: 110px 1fr 1fr; border-top: 1px solid var(--border); }
+  .compare-cell { padding: 16px; font-size: 14px; color: var(--muted-hi); }
+  .compare-cell.dim-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); display: flex; align-items: center; }
+  .compare-cell strong { color: var(--text); font-weight: 500; }
+  @media (max-width: 600px) {
+    .compare-header, .compare-row { grid-template-columns: 1fr; }
+    .compare-header { display: none; }
+    .compare-cell.dim-label { padding-bottom: 4px; }
+    .compare-cell[data-label]::before {
+      content: attr(data-label); display: block; margin-bottom: 4px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    .compare-row .compare-cell:nth-child(2) { padding-top: 4px; }
+  }
+
+  /* stage table: a real sequence, so it is numbered */
+  .stage-table { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin: 24px 0; }
+  .stage-head, .stage-row { display: grid; grid-template-columns: 64px 250px 1fr; }
+  .stage-head { background: var(--panel); }
+  .stage-head div { padding: 12px 16px; font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .stage-row { border-top: 1px solid var(--border); }
+  .stage-row div { padding: 14px 16px; font-size: 14px; color: var(--muted-hi); }
+  .stage-row .st-num { font-family: 'Playfair Display', serif; font-weight: 900; font-size: 22px; color: var(--gold); line-height: 1.3; }
+  .stage-row .st-file { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text); overflow-wrap: anywhere; }
+  .stage-row.optional .st-num { color: var(--muted); }
+  @media (max-width: 700px) {
+    .stage-head { display: none; }
+    .stage-row { grid-template-columns: 56px 1fr; }
+    .stage-row .st-desc { grid-column: 2; padding-top: 0; }
+  }
+
+  /* hop-by-hop path of one message */
+  .flow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 6px; margin: 28px 0 8px; }
+  .flow-node { background: var(--panel); border: 1px solid var(--border-hi); border-radius: 8px; padding: 9px 11px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--text); }
+  .flow-node small { display: block; font-size: 10px; letter-spacing: 0.06em; color: var(--muted); margin-top: 2px; }
+  .flow-node.core { border-color: rgba(47,122,130,0.5); }
+  .flow-node.bridge { border-color: rgba(217,164,65,0.5); }
+  .flow-node.phone { border-color: rgba(74,143,99,0.5); }
+  .flow-arrow { font-family: 'IBM Plex Mono', monospace; color: var(--muted); font-size: 13px; }
+  .flow-note { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); margin-bottom: 24px; }
+
+  /* debugging theories: a real sequence, so they are numbered */
+  .theory { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); margin: 20px 0; overflow: hidden; }
+  .theory-head { display: flex; align-items: center; gap: 14px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
+  .theory-num { font-family: 'Playfair Display', serif; font-weight: 900; font-size: 24px; color: var(--gold); line-height: 1; }
+  .theory-title { font-family: 'Playfair Display', serif; font-weight: 700; font-size: 18px; flex: 1; min-width: 200px; }
+  .verdict { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; border-radius: 5px; padding: 5px 10px; border: 1px solid; white-space: nowrap; }
+  .verdict.out  { color: #d97a63; border-color: rgba(217,122,99,0.4); background: rgba(8,9,7,0.6); }
+  .verdict.held { color: #7fc296; border-color: rgba(127,194,150,0.4); background: rgba(8,9,7,0.6); }
+  .theory-body { padding: 16px 20px 4px; }
+  .theory-body p { font-size: 15px; color: var(--muted-hi); }
+
+  .shot { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface); margin: 28px 0; position: relative; }
+  .shot img, .shot video { width: 100%; display: block; background: #05130f; }
+
+  .film-strip { display: flex; align-items: center; gap: 12px; margin: 40px 0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+  .film-strip::before, .film-strip::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+  .stat-strip { display: flex; flex-wrap: wrap; gap: 16px; margin: 28px 0; }
+  .stat-box { flex: 1; min-width: 140px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; }
+  .stat-num { font-family: 'Playfair Display', serif; font-size: 32px; font-weight: 900; color: var(--gold); line-height: 1; margin-bottom: 6px; }
+  .stat-label { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+
+  .hero-image { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 32px; }
+  .hero-image img { width: 100%; height: auto; display: block; }
+
+  .article-footer { border-top: 1px solid var(--border); padding-top: 40px; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 20px; }
+  .footer-left p { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--muted); letter-spacing: 0.05em; margin: 0 0 6px; }
+  .footer-links { display: flex; gap: 12px; flex-wrap: wrap; }
+  .footer-link {
+    display: inline-flex; align-items: center; gap: 8px; background: var(--gold-dim); border: 1px solid rgba(217,164,65,0.3);
+    border-radius: 6px; padding: 10px 18px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--gold);
+    text-decoration: none; letter-spacing: 0.08em; transition: background 0.2s;
+  }
+  .footer-link:hover { background: rgba(217,164,65,0.22); }
+
+  @keyframes fadeSlideUp { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
+  .hero { animation: fadeSlideUp 0.7s ease both; }
+  section { animation: fadeSlideUp 0.6s ease both; }
+
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .hero, section { animation: none; }
+    .footer-link { transition: none; }
+  }
+
+  @media (max-width: 600px) {
+    .container { padding: 0 16px 64px; }
+    .hero { padding: 48px 0 40px; }
+    .hero h1 { font-size: 36px; }
+    .flow { flex-direction: column; align-items: stretch; gap: 4px; }
+    .flow-arrow { align-self: center; transform: rotate(90deg); }
+    .hero-meta { gap: 6px 18px; }
+    .hero-meta .sep { display: none; }
+    h2 { font-size: 25px; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- ═══ HERO ═══ -->
+  <header class="hero">
+    <div class="hero-eyebrow">Field Notes · Mobile Banking Lab</div>
+
+    <div class="hero-image">
+      <img src="mobile_banking.png" width="1998" height="787" alt="Illustration: a hand holding a phone that shows a mobile-banking app, with a Cyclos server on the left and a Kannel SMS gateway on the right, SMS messages flowing between them.">
+    </div>
+
+    <h1>
+      Mobile Banking <span class="italic" style="color:#7fc296;">Rebuilt in a Day:</span><br>
+      Cyclos, Kannel, and<br>
+      <span class="accent">a Phone on a Cable</span>
+    </h1>
+
+    <div class="hero-meta">
+      <span>📅 September 2026</span>
+      <span class="sep">·</span>
+      <span>🔗 github.com/niyid/mobile-banking</span>
+      <span class="sep">·</span>
+      <span>🛠 11 shell scripts + 1 Python service</span>
+      <span class="sep">·</span>
+      <span>⏱ 11 min read</span>
+    </div>
+
+    <p class="hero-lead">
+      In 2013 I modelled mobile banking with Cyclos as the banking core and Kannel as the SMS gateway, with a
+      MiFi USB adapter from Etisalat as the radio. Getting those three pieces to talk to each other took the
+      better part of several months. This time the radio is an Android phone on a USB cable, the whole
+      environment is a folder of re-runnable scripts plus one small Python service, and Claude wrote and
+      debugged them in a working session of about a day. This is what was built, what broke along the way,
+      and what is still not finished.
+    </p>
+  </header>
+
+  <!-- ═══ SECTION: OLD LAB, NEW LAB ═══ -->
+  <section>
+    <div class="section-kicker">The Old Lab and the New One</div>
+    <h2>Same Idea, Different Radio</h2>
+    <p>
+      The idea has not changed: a customer sends a text message from an ordinary phone, a bank-grade ledger
+      moves the money, and a text message comes back. What has changed is how much of the plumbing has to be
+      assembled by hand.
+    </p>
+
+    <div class="compare-cards">
+      <div class="compare-header">
+        <div class="compare-header-cell"></div>
+        <div class="compare-header-cell">2013 lab</div>
+        <div class="compare-header-cell">2026 lab</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Banking core</div>
+        <div class="compare-cell" data-label="2013 lab"><strong>Cyclos</strong></div>
+        <div class="compare-cell" data-label="2026 lab"><strong>Cyclos 4.16.20</strong> on Tomcat 9, PostgreSQL with PostGIS</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">SMS radio</div>
+        <div class="compare-cell" data-label="2013 lab"><strong>MiFi USB adapter</strong> from Etisalat</div>
+        <div class="compare-cell" data-label="2026 lab"><strong>Android phone</strong> on a USB cable, running the open-source SMS Gateway for Android app</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Gateway</div>
+        <div class="compare-cell" data-label="2013 lab"><strong>Kannel</strong></div>
+        <div class="compare-cell" data-label="2026 lab">A small <strong>bridge service</strong> that speaks Kannel's <code>sendsms</code> dialect; Kannel itself is an optional extra</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Assembled</div>
+        <div class="compare-cell" data-label="2013 lab">By hand, over <strong>several months</strong></div>
+        <div class="compare-cell" data-label="2026 lab">As scripts, written and debugged with Claude in about <strong>a day</strong></div>
+      </div>
+    </div>
+
+    <p>
+      Swapping a modem for a phone is not just a matter of taste. A stock Android phone cannot act as the AT
+      modem that Kannel wants to drive over USB. So the phone runs an app that exposes its SMS ability as a
+      small HTTP API, and an <code>adb</code> tunnel over the same USB cable carries that API to the laptop. No
+      Wi-Fi, no root.
+    </p>
+
+    <div class="callout callout-info">
+      <span class="callout-icon">📡</span>
+      <div class="callout-body">
+        <strong>What happened to Kannel</strong>
+        <p>Cyclos 4 has its own SMS channel that calls a plain HTTP URL, so it no longer needs Kannel between
+        it and the radio. The bridge copies Kannel's URL shape (<code>/cgi-bin/sendsms?username=…&amp;password=…&amp;to=…&amp;text=…</code>)
+        and even answers with Kannel's <code>0: Accepted for delivery</code>, so Cyclos, or any older tooling
+        that expects Kannel, can talk to it unchanged.</p>
+        <p>Stage 40 of the setup still installs real Kannel, with the bridge configured as its "generic" HTTP
+        SMSC. It is optional and off by default.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION: ARCHITECTURE ═══ -->
+  <section>
+    <div class="section-kicker sea">Architecture</div>
+    <h2>One Message, Five Hops</h2>
+    <p>
+      Everything runs on one Ubuntu laptop. The only thing outside it is the phone, and the only thing between
+      the two is a USB cable.
+    </p>
+
+    <div class="flow" role="img" aria-label="Path of an outbound message: Cyclos, then the bridge, then the adb tunnel, then the phone, then the carrier network.">
+      <div class="flow-node core">Cyclos<small>Tomcat 9 · :8080</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node bridge">cyclos-bridge<small>Flask · 127.0.0.1:5000</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node">adb tunnel<small>USB · 18080 ⇄ 8081</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node phone">Phone<small>SMS Gateway app</small></div>
+      <span class="flow-arrow">→</span>
+      <div class="flow-node">Carrier<small>customer's phone</small></div>
+    </div>
+    <p class="flow-note">Outbound, left to right. Inbound takes the same route in reverse.</p>
+
+    <div class="compare-cards">
+      <div class="compare-header">
+        <div class="compare-header-cell">Hop</div>
+        <div class="compare-header-cell">Outbound (Cyclos to customer)</div>
+        <div class="compare-header-cell">Inbound (customer to Cyclos)</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Cyclos</div>
+        <div class="compare-cell" data-label="Outbound: Cyclos to customer">Calls the gateway URL with the recipient and message filled in.</div>
+        <div class="compare-cell" data-label="Inbound: customer to Cyclos">Receives the text on its <strong>Inbound SMS URL</strong>.</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Bridge</div>
+        <div class="compare-cell" data-label="Outbound: Cyclos to customer"><code>/cgi-bin/sendsms</code> checks the username and password, restores a <code>+</code> the query string turned into a space, and calls the phone.</div>
+        <div class="compare-cell" data-label="Inbound: customer to Cyclos"><code>/webhook</code> receives the phone's <code>sms:received</code> event and forwards sender and text to Cyclos.</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">USB tunnel</div>
+        <div class="compare-cell" data-label="Outbound: Cyclos to customer"><code>adb forward</code>: laptop <code>127.0.0.1:18080</code> to phone <code>:8080</code>.</div>
+        <div class="compare-cell" data-label="Inbound: customer to Cyclos"><code>adb reverse</code>: phone <code>localhost:8081</code> to laptop <code>:5000</code>.</div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-cell dim-label">Phone</div>
+        <div class="compare-cell" data-label="Outbound: Cyclos to customer">The app sends the text through the phone's own SIM.</div>
+        <div class="compare-cell" data-label="Inbound: customer to Cyclos">The app fires a webhook the moment a text arrives.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION: STAGES ═══ -->
+  <section>
+    <div class="section-kicker">Stage by Stage</div>
+    <h2>Eleven Shell Scripts, One Order</h2>
+    <p>
+      The environment is built by numbered stages, and each stage is also a standalone script that is safe to
+      re-run. That paid off in practice: the fix described below was "change one line in stage 10, re-run stage 10",
+      not "start again".
+    </p>
+
+    <div class="stage-table">
+      <div class="stage-head"><div>Stage</div><div>Script</div><div>What it does</div></div>
+      <div class="stage-row"><div class="st-num">00</div><div class="st-file">00-install-prereqs.sh</div><div class="st-desc">Java 17, PostgreSQL with PostGIS, Tomcat 9 (reuses <code>~/tomcat</code> if it is 9.x, otherwise installs <code>~/tomcat9</code>), adb, git, Python 3.</div></div>
+      <div class="stage-row"><div class="st-num">10</div><div class="st-file">10-install-cyclos.sh</div><div class="st-desc">Creates the <code>cyclos4</code> database and extensions, deploys Cyclos as Tomcat's ROOT app, writes its config, starts Tomcat and waits until Cyclos answers.</div></div>
+      <div class="stage-row"><div class="st-num">20</div><div class="st-file">20-setup-phone-gateway.sh</div><div class="st-desc">Pairs the phone over adb and records the phone app's credentials. Interactive.</div></div>
+      <div class="stage-row"><div class="st-num">25</div><div class="st-file">25-setup-bridge-venv.sh</div><div class="st-desc">Python virtualenv for the bridge; rebuilt automatically if the folder was moved.</div></div>
+      <div class="stage-row"><div class="st-num">30</div><div class="st-file">30-install-bridge-service.sh</div><div class="st-desc">Installs the bridge as the <code>cyclos-bridge</code> systemd service and checks its <code>/health</code> endpoint.</div></div>
+      <div class="stage-row optional"><div class="st-num">40</div><div class="st-file">40-install-kannel.sh</div><div class="st-desc">Optional. Installs Kannel with the bridge as its SMSC.</div></div>
+      <div class="stage-row"><div class="st-num">50</div><div class="st-file">git-init-commit.sh</div><div class="st-desc">Commits scripts and templates, never the secrets folder, to <code>~/git/mobile-banking</code>.</div></div>
+    </div>
+    <p>
+      Around them sit <code>run-all.sh</code> (which takes <code>--from</code> and <code>--until</code> so a run
+      can stop after Cyclos and resume at the phone), <code>cyclosctl.sh</code> for start, stop, status and
+      logs, <code>phone-tunnel.sh</code> to rebuild the adb tunnels, and <code>lib.sh</code> for shared helpers.
+      If a stage fails, <code>run-all.sh</code> prints the exact command to resume from it.
+    </p>
+
+    <h3>Stages 00 and 10: Cyclos on Tomcat 9 and PostgreSQL</h3>
+    <p>
+      Cyclos 4.16 needs Tomcat 9; Tomcat 10 and later moved to <code>jakarta.*</code> packages and will not run
+      it. It also needs PostgreSQL with PostGIS and four extensions: <code>cube</code>,
+      <code>earthdistance</code>, <code>unaccent</code> and <code>pgcrypto</code>. Stage 00 installs all of it and
+      pins Tomcat to Java 17. When it has to install Tomcat itself, it verifies the download against its SHA-512
+      checksum.
+    </p>
+    <p>
+      Stage 10 does the delicate work. It generates a random 24-character database password and saves it to
+      <code>~/.cyclos/db.env</code> with mode 600. It rewrites only the datasource lines of Cyclos's shipped
+      properties template, printing the result with the password masked. It sizes Tomcat's heap from the
+      machine's memory (1.5 GB on 4 GB or more, 1 GB otherwise). It stops whatever holds ports 8080 and 8005,
+      but refuses to kill a process that isn't Tomcat. And it decides that Cyclos is "up" by watching Tomcat's
+      log from the offset where it started, not by sleeping and hoping, so lines from earlier runs can't fool it.
+    </p>
+
+    <div class="callout callout-warn">
+      <span class="callout-icon">🔑</span>
+      <div class="callout-body">
+        <strong>Two steps stay manual, on purpose</strong>
+        <p>The Cyclos download sits behind a login at license.cyclos.org, so a script can't fetch it; you
+        download the zip and the script finds it. And on first start Cyclos asks for your license.cyclos.org
+        credentials to activate the free licence (up to 300 users, per the repo's README). Those go into the
+        browser only, never into a script and never into a chat.</p>
+      </div>
+    </div>
+
+    <h3>Stages 20 and 30: A phone as the gateway</h3>
+    <p>
+      On the phone, the open-source <em>SMS Gateway for Android</em> app runs in local-server mode and shows a
+      username and password. Stage 20 walks through enabling USB debugging, sets up the two adb tunnels, checks
+      the phone app answers through them, and saves the credentials to <code>~/.cyclos/phone-gateway.env</code>.
+      It also generates a separate password that Cyclos must present to the bridge, and tries to register the
+      inbound-SMS webhook in the app automatically.
+    </p>
+    <p>
+      The bridge is a Flask app of about 180 lines, and most of its size is defensive:
+    </p>
+    <ul>
+      <li>It listens on <code>127.0.0.1</code> only and refuses to send at all unless the send password is set. An earlier draft defaulted to a placeholder password on every network interface; that was removed.</li>
+      <li>Passwords are compared in constant time.</li>
+      <li>Message bodies are never written to its log, because a text can contain a PIN, and phone numbers are masked.</li>
+      <li>It tries the phone app's newer <code>/messages</code> endpoint and falls back to the older <code>/message</code>.</li>
+      <li>Stage 30 runs it under systemd with <code>NoNewPrivileges</code> and <code>PrivateTmp</code>, restarting on failure.</li>
+    </ul>
+
+    <h3>Stage 50: Commit the config, not the secrets</h3>
+    <p>
+      The last stage copies the scripts and templates into <code>~/git/mobile-banking</code> and commits them.
+      Real secrets live only in <code>~/.cyclos/</code> (directory mode 700, files 600), and
+      <code>.gitignore</code> excludes <code>*.env</code>, virtualenvs and bytecode. The one file that would
+      otherwise need passwords, <code>kannel.conf</code>, is committed as a template with
+      <code>&lt;CHANGE_ME_*&gt;</code> placeholders that stage 40 fills in at install time. The repository was
+      then created and pushed with <code>gh repo create mobile-banking --public --source=. --remote=origin</code>.
+    </p>
+  </section>
+
+  <!-- ═══ SECTION: WHAT BROKE ═══ -->
+  <section>
+    <div class="section-kicker red">What Broke</div>
+    <h2>The Log4j Error That Wasn't a Missing Jar</h2>
+    <p>
+      An early start of Cyclos failed with <code>NoClassDefFoundError: org.apache.logging.log4j.Logger</code>,
+      thrown inside Tomcat's <code>WebappServiceLoader</code> while it scanned the web app's jars. The obvious
+      reading is that a jar is missing. That reading was wrong, and how it got disproven is worth more than the
+      fix itself.
+    </p>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">1</span>
+        <span class="theory-title">A log4j jar is missing or corrupt</span>
+        <span class="verdict out">Ruled out</span>
+      </div>
+      <div class="theory-body">
+        <p>The error names a class from <code>log4j-api</code>, so the script gained a self-check: count the
+        deployed jars and fail loudly if <code>log4j-api</code> or <code>log4j-core</code> is absent. A
+        diagnostic script then showed both present at version 2.25.3, identical between the Cyclos
+        distribution and the deployed copy, with <code>Logger.class</code> intact inside the jar. So the
+        repair never fired, and downloading replacement jars would have fixed nothing.</p>
+      </div>
+    </div>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">2</span>
+        <span class="theory-title">Tomcat is loading the class with the wrong classloader</span>
+        <span class="verdict out">Ruled out</span>
+      </div>
+      <div class="theory-body">
+        <p>The stack trace ran through the scan for <code>ServletContainerInitializer</code> declarations, and
+        two of the deployed app's 372 jars declare one: <code>log4j-web</code> and <code>spring-web</code>. A
+        second diagnostic checked whether Tomcat's own <code>lib/</code> carried a conflicting jar (only the
+        normal <code>servlet-api.jar</code>), whether <code>catalina.properties</code> excluded
+        <code>log4j-web</code> from scanning (it explicitly lists it to be scanned), and whether duplicate
+        log4j jars existed anywhere on the deploy path (none). Nothing there explained it.</p>
+      </div>
+    </div>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">3</span>
+        <span class="theory-title">Tomcat is bringing up an old context before the new one</span>
+        <span class="verdict held">The fix that held</span>
+      </div>
+      <div class="theory-body">
+        <p>The log contained a line about undeploying the context <code>/cyclos</code>, a context this
+        deployment never created. Tomcat keeps persistent context descriptors in
+        <code>conf/Catalina/localhost/</code>, separate from the <code>webapps/</code> folder, and reprocesses
+        them on every start. The script wiped <code>webapps/</code> and <code>work/</code> but never touched
+        those descriptors, so a leftover <code>ROOT.xml</code> or <code>cyclos.xml</code> could bring up a stale,
+        half-formed context ahead of the fresh one. The fix is two lines in stage 10:</p>
+      </div>
+    </div>
+
+<pre><span class="c"># Tomcat keeps context descriptors independent of webapps/ -</span>
+<span class="c"># clear them so webapps/ is the only source of truth</span>
+<span class="k">rm -f</span> "$TOMCAT_HOME"/conf/Catalina/localhost/ROOT.xml \
+      "$TOMCAT_HOME"/conf/Catalina/localhost/cyclos.xml</pre>
+
+    <p>
+      The next run created the schema and Cyclos answered with an HTTP 302 at
+      <code>http://127.0.0.1:8080/</code>, the redirect that means the application is alive.
+    </p>
+
+    <div class="callout callout-good">
+      <span class="callout-icon">🔬</span>
+      <div class="callout-body">
+        <strong>What the debugging actually showed</strong>
+        <p>Claude's first diagnosis sounded certain and was wrong. What corrected it was not a cleverer guess but
+        cheap diagnostics designed to be able to disprove one, run on the real machine, with the output pasted
+        back. The guard from theory 1 is still in the script; it stays silent unless the jars are truly missing.</p>
+      </div>
+    </div>
+    <div class="callout callout-warn">
+      <span class="callout-icon">🎙️</span>
+      <div class="callout-body">
+        <strong>A caveat on theory 3</strong>
+        <p>The log evidence pointed at stale descriptors and the fix worked, but nobody captured what
+        <code>conf/Catalina/localhost/</code> held before the fix. It is the best-supported explanation, not a
+        proven one.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION: HOW THE DAY WENT ═══ -->
+  <section>
+    <div class="section-kicker forest">The Working Loop</div>
+    <h2>How a Day Replaced Months</h2>
+    <p>
+      The division of labour was plain. I downloaded the Cyclos zip, plugged in and unlocked the phone, granted
+      the app its permissions, typed the licence credentials into the browser, ran each script, and pasted back
+      whatever it printed. Claude wrote the scripts, read the output, and proposed the next change. When
+      something failed, the fix went into the script and the stage was re-run, rather than being patched once
+      in a terminal and forgotten. The log4j episode above is the documented example: the two-line fix lives
+      in stage 10, so it applies on every future deploy.
+    </p>
+    <p>
+      The difference that lasts is the artifact. A lab assembled by hand lives on one machine and in one
+      person's memory. This one lives in a repository, and anyone with Ubuntu, a phone and a Cyclos download
+      can clone it and re-run it.
+    </p>
+  </section>
+
+  <!-- ═══ SECTION: LIMITS ═══ -->
+  <section>
+    <div class="section-kicker">Reported, Not Hidden</div>
+    <h2>What This Doesn't Do Yet</h2>
+    <div class="callout callout-warn">
+      <span class="callout-icon">📨</span>
+      <div class="callout-body">
+        <strong>SMS is not yet wired into Cyclos</strong>
+        <p>Cyclos 4's own SMS channel is configured in the admin UI under <em>System management, System
+        configuration, Configurations, Channels, SMS</em>. The outbound URL there should point at the bridge, and
+        the <strong>Inbound SMS URL</strong> Cyclos displays goes into <code>CYCLOS_SMS_RECEIVE_URL</code> in
+        the gateway settings. The repository's README says plainly that this step has not been tested against a
+        running 4.16.20 and that the parameter names must be checked against the reference manual shipped in the
+        distribution.</p>
+        <p>The bridge reports itself healthy and Cyclos is running, but this article does not claim a text has
+        travelled the whole loop, because that is exactly the part still open.</p>
+      </div>
+    </div>
+    <div class="callout callout-warn">
+      <span class="callout-icon">☎️</span>
+      <div class="callout-body">
+        <strong>No USSD</strong>
+        <p>A phone plugged into a laptop cannot receive <code>*code#</code> menus: USSD is a live session with
+        the carrier's own gateway. That needs a short code from an aggregator such as Africa's Talking or
+        Termii, which can also carry the SMS without a phone.</p>
+      </div>
+    </div>
+    <div class="callout callout-info">
+      <span class="callout-icon">🔌</span>
+      <div class="callout-body">
+        <strong>The tunnel lives and dies with the cable</strong>
+        <p>The adb tunnels last only while the phone stays connected. After re-plugging, run
+        <code>./phone-tunnel.sh</code>. On the phone, battery optimisation for the gateway app has to be off or
+        Android will eventually stop it.</p>
+      </div>
+    </div>
+    <div class="callout callout-info">
+      <span class="callout-icon">🔐</span>
+      <div class="callout-body">
+        <strong>One password travels in a URL</strong>
+        <p>The outbound URL configured in Cyclos carries the bridge's send password, so it will appear in
+        Cyclos's own logs. The traffic is local to the machine, but rotate the password if the machine is
+        shared.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ SECTION: REPRODUCE ═══ -->
+  <section>
+    <div class="section-kicker sea">Try It</div>
+    <h2>Reproduce It on Your Own Ubuntu Machine</h2>
+    <p>
+      You need Ubuntu, sudo, an Android phone with a USB data cable, and your own
+      <code>cyclos-4.16.20.zip</code> from license.cyclos.org placed in your home or Downloads folder. Run the
+      scripts as a normal user, not as root.
+    </p>
+<pre><span class="k">git clone</span> https://github.com/niyid/mobile-banking.git
+<span class="k">cd</span> mobile-banking/setup
+
+<span class="c"># prerequisites + Cyclos (first start creates the schema: allow several minutes)</span>
+./run-all.sh --until 10
+
+<span class="c"># open http://localhost:8080/ and activate the licence in the browser</span>
+
+<span class="c"># phone gateway, bridge virtualenv, bridge service (stops before the git step)</span>
+./run-all.sh --from 20 --until 30
+
+curl http://127.0.0.1:5000/health</pre>
+    <p>
+      Stage 50 is the author's own backup step: it commits into <code>~/git/mobile-banking</code> and pushes if
+      a remote is set, so stop at 30. If the
+      first Cyclos start fails halfway, <code>RESET_DB=1 ./10-install-cyclos.sh</code> drops and recreates the
+      database, and destroys any Cyclos data in it.
+    </p>
+  </section>
+
+  <!-- ═══ SECTION: STATS ═══ -->
+  <section>
+    <div class="section-kicker">Tally</div>
+    <h2>The Rebuild in Numbers</h2>
+    <div class="stat-strip">
+      <div class="stat-box"><div class="stat-num">~1 day</div><div class="stat-label">to rebuild what took months in 2013</div></div>
+      <div class="stat-box"><div class="stat-num">1,037</div><div class="stat-label">lines across 11 scripts and the bridge</div></div>
+      <div class="stat-box"><div class="stat-num">372</div><div class="stat-label">jars in Cyclos's WEB-INF/lib</div></div>
+      <div class="stat-box"><div class="stat-num">3</div><div class="stat-label">theories before the fix that held</div></div>
+    </div>
+  </section>
+
+  <!-- ═══ CONCLUSION ═══ -->
+  <section>
+    <div class="section-kicker">Conclusion</div>
+    <h2>The Scaffolding Is Done; the Banking Is Ahead</h2>
+    <p>
+      What took months in 2013 was getting a banking core, a gateway and a radio to speak to one another. That
+      part is now a repository that rebuilds it in one pass, and the pieces that failed along the way failed
+      loudly and were fixed in the scripts, not in someone's shell history.
+    </p>
+    <p>
+      What remains is the part that makes it banking rather than plumbing: wiring the bridge into Cyclos's SMS
+      channel and proving a message goes round the whole loop, then designing the products (account types,
+      payment flows, PIN handling), and deciding whether a USSD short code through an aggregator belongs in the
+      picture. Those are next, and they are the interesting half.
+    </p>
+  </section>
+
+  <!-- ═══ FOOTER ═══ -->
+  <footer class="article-footer">
+    <div class="footer-left">
+      <p>Every step in this article comes from the scripts and README in the repository, and from the actual setup session.</p>
+      <p>github.com/niyid/mobile-banking · Cyclos 4.16.20 · Tomcat 9 · PostgreSQL + PostGIS · Java 17 · Python + Flask</p>
+    </div>
+    <div class="footer-links">
+      <a class="footer-link" href="https://github.com/niyid/mobile-banking" target="_blank" rel="noopener">🏦 mobile-banking →</a>
+      <a class="footer-link" href="https://github.com/niyid/mobile-banking/blob/main/setup/README.md" target="_blank" rel="noopener">📄 setup README →</a>
+      <a class="footer-link" href="https://github.com/capcom6/android-sms-gateway" target="_blank" rel="noopener">📱 SMS Gateway for Android →</a>
+      <a class="footer-link" href="https://www.kannel.org" target="_blank" rel="noopener">📡 Kannel →</a>
+    </div>
+  </footer>
+
+</div>
+</body>
+</html>
