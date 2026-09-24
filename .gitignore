@@ -1,0 +1,5 @@
+# secrets / machine-local state never belong in this repo
+*.env
+venv/
+__pycache__/
+*.pyc

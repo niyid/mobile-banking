@@ -1,0 +1,17 @@
+[Unit]
+Description=Cyclos <-> phone SMS gateway bridge
+After=network.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@SETUP_DIR@/bridge
+EnvironmentFile=-@GATEWAY_ENV@
+ExecStart=@SETUP_DIR@/bridge/venv/bin/python @SETUP_DIR@/bridge/bridge.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
