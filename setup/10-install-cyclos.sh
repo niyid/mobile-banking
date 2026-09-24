@@ -105,6 +105,14 @@ log "Deploying Cyclos into $APP"
 rm -rf "$TOMCAT_HOME/webapps/cyclos" "$TOMCAT_HOME/webapps/cyclos.war" \
        "$TOMCAT_HOME/webapps/ROOT" "$TOMCAT_HOME/webapps/ROOT.war" \
        "$TOMCAT_HOME"/work/Catalina/localhost/* "$TOMCAT_HOME"/temp/*
+# Tomcat also keeps persistent context descriptors under conf/Catalina/localhost/
+# independent of the webapps/ directory - a leftover ROOT.xml or cyclos.xml from an
+# earlier (e.g. Cyclos 3) deployment gets reprocessed on every startup regardless of
+# what we just did to webapps/, and can bring up a stale/incomplete context before
+# the fresh directory is even deployed. Clear them so webapps/ is the only source of
+# truth for what gets deployed.
+rm -f "$TOMCAT_HOME"/conf/Catalina/localhost/ROOT.xml \
+      "$TOMCAT_HOME"/conf/Catalina/localhost/cyclos.xml
 cp -r "$WEB" "$APP" || die "copying the web application into Tomcat failed"
 
 CLASSES="$APP/WEB-INF/classes"
@@ -158,6 +166,37 @@ if ! ls "$APP"/WEB-INF/lib/postgresql*.jar >/dev/null 2>&1; then
     && unzip -tq "$JAR_TMP" >/dev/null \
     || die "Could not download a complete PostgreSQL JDBC driver"
   mv "$JAR_TMP" "$APP/WEB-INF/lib/postgresql-42.7.4.jar"
+fi
+
+# Sanity-check the jar set we actually deployed. A NoClassDefFoundError for
+# org.apache.logging.log4j.Logger at startup means log4j-api.jar (and usually
+# log4j-core.jar) is missing or corrupt in WEB-INF/lib - this happens if the
+# distribution zip was partially downloaded/extracted. We can't be certain
+# which log4j2 version Cyclos 4.16.20 was built against, so this is a
+# best-effort repair: only trips if the jars are truly absent, and downloads
+# a recent patched 2.x release rather than guessing an exact pin.
+JAR_COUNT="$(ls "$APP"/WEB-INF/lib/*.jar 2>/dev/null | wc -l)"
+LOG4J_API="$(ls "$APP"/WEB-INF/lib/log4j-api*.jar 2>/dev/null | head -1)"
+LOG4J_CORE="$(ls "$APP"/WEB-INF/lib/log4j-core*.jar 2>/dev/null | head -1)"
+echo "Deployed WEB-INF/lib: $JAR_COUNT jars (log4j-api: ${LOG4J_API:-MISSING}, log4j-core: ${LOG4J_CORE:-MISSING})"
+
+if [[ -z "$LOG4J_API" || -z "$LOG4J_CORE" ]]; then
+  warn "log4j2 jar(s) missing from the deployed webapp - Tomcat will fail with NoClassDefFoundError: org.apache.logging.log4j.Logger"
+  warn "Checking whether the source distribution actually has them..."
+  if ls "$WEB"/WEB-INF/lib/log4j-api*.jar "$WEB"/WEB-INF/lib/log4j-core*.jar >/dev/null 2>&1; then
+    die "log4j jars exist in $WEB/WEB-INF/lib but did not make it into $APP/WEB-INF/lib - the 'cp -r' copy above is incomplete or the source jars are corrupt. Check disk space and re-run with RESET_DB left at 0 (no data loss on re-copy)."
+  fi
+  warn "log4j jars are absent from the distribution itself ($WEB/WEB-INF/lib). This most likely means $HOME/cyclos-$CYCLOS_VERSION was extracted from a partial/corrupt download."
+  warn "Downloading log4j-api/log4j-core 2.24.3 as a stopgap - if Cyclos needs a different exact version this may not resolve it, but it's a safe, currently-patched release to try first."
+  for spec in "log4j-api" "log4j-core"; do
+    JAR_TMP="$(mktemp)"
+    curl -fL --retry 3 -o "$JAR_TMP" \
+      "https://repo1.maven.org/maven2/org/apache/logging/log4j/${spec}/2.24.3/${spec}-2.24.3.jar" \
+      && unzip -tq "$JAR_TMP" >/dev/null \
+      || die "Could not download $spec - check your internet connection, or download cyclos-$CYCLOS_VERSION.zip again from https://license.cyclos.org (the current copy is likely corrupt)"
+    mv "$JAR_TMP" "$APP/WEB-INF/lib/${spec}-2.24.3.jar"
+  done
+  warn "log4j jars added. Re-download cyclos-$CYCLOS_VERSION.zip from https://license.cyclos.org when convenient and re-run this script (RESET_DB=0) to get the exact jars Cyclos shipped with, rather than relying on this stopgap."
 fi
 
 # --------------------------------------------------------------- 4. setenv.sh
