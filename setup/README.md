@@ -25,6 +25,7 @@ Every stage is also a standalone script and is safe to re-run.
 | 20 | `20-setup-phone-gateway.sh` | Pairs the phone via adb, asks for the phone app's credentials, writes `~/.cyclos/phone-gateway.env` |
 | 25 | `25-setup-bridge-venv.sh` | Python venv for the bridge (rebuilt automatically if the folder was moved) |
 | 30 | `30-install-bridge-service.sh` | Installs/starts the `cyclos-bridge` systemd service with the correct paths |
+| 35 | `35-verify-sms-wiring.sh` | Reports whether SMS is actually wired end-to-end (bridge config + Cyclos admin-UI steps below). Never fails the run - the admin-UI step is normally still pending after a first run. Safe to re-run any time. |
 | 40 | `40-install-kannel.sh` | Optional. Kannel is not needed for Cyclos 4 |
 | 50 | `git-init-commit.sh` | Commits scripts/templates (never `~/.cyclos`) into `~/git/mobile-banking` |
 
@@ -42,14 +43,21 @@ Helpers: `cyclosctl.sh start|stop|restart|status|logs` (Tomcat) and `phone-tunne
 
 ## Wiring SMS into Cyclos
 
-Cyclos 4 has its own SMS channel; the bridge plugs into it. This part is done in the Cyclos admin UI and I have not been able to test it against a running 4.16.20 - verify the parameter names against `cyclos-reference.html` (search for "SMS") in your extracted folder.
+**This step is not automated, and finishing `run-all.sh` does not mean it's done.** Cyclos 4 has its
+own SMS channel, and the bridge is built to plug into it, but Cyclos does not expose any API for
+configuring that channel - only the admin UI does (confirmed against Cyclos's own web-services
+reference, which explicitly documents "SMS operation" as a channel a gateway calls, not something
+a REST client can configure). So stages 00-30 only get the bridge and the phone ready; the Cyclos
+side below always has to be done by hand, and it's easy to skip without noticing since nothing
+about the earlier stages fails if you do. Run `./35-verify-sms-wiring.sh` any time to check the
+current status instead of assuming it from a clean `run-all.sh` run.
 
 1. Admin: *System management > System configuration > Configurations* > your configuration > *Channels* > **SMS**: enable it.
 2. **Outbound** - set the gateway URL to the bridge, using the recipient/message variables that Cyclos lists next to that field:
    `http://127.0.0.1:5000/cgi-bin/sendsms?username=cyclos&password=<SENDSMS_PASS>&to=<recipient variable>&text=<message variable>`
    `SENDSMS_PASS` is in `~/.cyclos/phone-gateway.env` (generated during stage 20).
 3. **Inbound** - Cyclos displays an **Inbound SMS URL** on that page. Put it in `~/.cyclos/phone-gateway.env` as `CYCLOS_SMS_RECEIVE_URL=...`, then `sudo systemctl restart cyclos-bridge`. If Cyclos expects other parameter names or GET, set `CYCLOS_SMS_FROM_PARAM`, `CYCLOS_SMS_TEXT_PARAM`, `CYCLOS_SMS_METHOD` in the same file.
-4. Test: `curl 'http://127.0.0.1:5000/health'` shows what is configured; the admin "SMS messages" overview in Cyclos shows send/receive status.
+4. Verify: `./35-verify-sms-wiring.sh` checks the bridge is ready on both ends (send password set, inbound URL copied in from step 3) and prints the exact outbound URL and admin-UI path for steps 1-2 as a reminder. It cannot see into the Cyclos UI itself, so a clean result there still isn't proof steps 1-2 were actually done in Cyclos - only that the bridge side is ready for them. Once it's green, send a real test message to the gateway phone number and watch `sudo journalctl -u cyclos-bridge -f`; the admin "SMS messages" overview in Cyclos also shows send/receive status.
 
 ## Security notes
 

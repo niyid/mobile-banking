@@ -6,6 +6,7 @@
 #   20  pair the phone as SMS gateway   (interactive: needs the phone plugged in)
 #   25  bridge Python virtualenv
 #   30  bridge as a systemd service
+#   35  verify SMS is actually wired into Cyclos (reports only, never fails the run)
 #   40  Kannel                          (optional, only with --with-kannel)
 #   50  commit the non-secret config to ~/git/mobile-banking
 #
@@ -67,6 +68,10 @@ fi
 
 run_stage 25 "Setting up the bridge virtualenv"            25-setup-bridge-venv.sh
 run_stage 30 "Installing the bridge as a systemd service"  30-install-bridge-service.sh
+if in_range 35; then
+  log "[35] Verifying SMS is actually wired into Cyclos"
+  ./35-verify-sms-wiring.sh 2>&1 | tee -a "$LOG_FILE"   # never fails the run - report only
+fi
 if [[ "$WITH_KANNEL" -eq 1 ]]; then run_stage 40 "Installing Kannel (optional)" 40-install-kannel.sh; fi
 run_stage 50 "Committing config to git"                    git-init-commit.sh
 
@@ -76,5 +81,5 @@ cat <<EOF | tee -a "$LOG_FILE"
 Cyclos:         http://localhost:8080/        (control: ./cyclosctl.sh start|stop|restart|status|logs)
 Bridge health:  http://127.0.0.1:5000/health
 Secrets:        ~/.cyclos/   (db.env, phone-gateway.env - never committed)
-SMS wiring:     see README.md, "Wiring SMS into Cyclos"
+SMS wiring:     ./35-verify-sms-wiring.sh reports live status; see README.md, "Wiring SMS into Cyclos" for the steps
 EOF
