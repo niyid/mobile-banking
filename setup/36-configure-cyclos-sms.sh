@@ -44,7 +44,12 @@ SENDSMS_PASS="$(env_get "$GATEWAY_ENV" SENDSMS_PASS)"
 [[ -n "$SENDSMS_USER" && -n "$SENDSMS_PASS" ]] || die "SENDSMS_USER/SENDSMS_PASS missing in $GATEWAY_ENV"
 
 BRIDGE_URL="${BRIDGE_URL:-http://127.0.0.1:${BRIDGE_PORT:-5000}}"
-GATEWAY_URL="${GATEWAY_URL:-$BRIDGE_URL/cgi-bin/sendsms?to={phoneNumber}&text={message}}"
+# NOTE: the literal { } placeholders must NOT live inside a ${VAR:-...} default -
+# bash's brace-matcher for parameter expansion gets confused by unquoted { } in the
+# default word and truncates it (to=`{phoneNumber` , dropping the rest). Build the
+# default separately instead.
+DEFAULT_GATEWAY_URL="$BRIDGE_URL/cgi-bin/sendsms?to={phoneNumber}&text={message}"
+GATEWAY_URL="${GATEWAY_URL:-$DEFAULT_GATEWAY_URL}"
 
 log "Checking how many configurations exist in '$DB_NAME'"
 COUNT="$(pgsu -d "$DB_NAME" -Atc "SELECT count(*) FROM configurations")"
@@ -78,9 +83,14 @@ result in the admin UI (Channels > SMS) afterwards.
 EOF
 if [[ -t 0 ]]; then read -rp "Proceed? [y/N] " CONFIRM; [[ "$CONFIRM" =~ ^[Yy]$ ]] || die "Aborted."; fi
 
+# NOTE: `psql -c "..."` does NOT perform :'var' interpolation - only -f/stdin do
+# (verified against a live 16.x server: -c leaves the literal colons in the SQL,
+# which Postgres then rejects as a syntax error). Feed the UPDATE via stdin instead.
 pgsu -d "$DB_NAME" -v ON_ERROR_STOP=1 \
   -v gwurl="$GATEWAY_URL" -v gwuser="$SENDSMS_USER" -v gwpass="$SENDSMS_PASS" -v cfgid="$CONFIG_ID" \
-  -c "UPDATE configurations SET sms_enabled = true, sms_gateway_url = :'gwurl', sms_username = :'gwuser', sms_password = :'gwpass' WHERE id = :cfgid;"
+  <<'SQL'
+UPDATE configurations SET sms_enabled = true, sms_gateway_url = :'gwurl', sms_username = :'gwuser', sms_password = :'gwpass' WHERE id = :cfgid;
+SQL
 
 log "Restarting Tomcat so Cyclos reloads the configuration"
 "$SETUP_DIR/cyclosctl.sh" restart

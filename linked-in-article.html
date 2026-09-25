@@ -6,14 +6,14 @@
 <title>Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable</title>
 
 <!-- SEO -->
-<meta name="description" content="In 2013 it took months to model mobile banking with Cyclos and Kannel, using an Etisalat MiFi USB adapter as the radio. In 2026 the same idea is rebuilt in about a day with Claude: Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and eleven re-runnable scripts. Includes the log4j error that wasn't a missing jar, and what still isn't wired up.">
+<meta name="description" content="In 2013 it took months to model mobile banking with Cyclos and Kannel, using an Etisalat MiFi USB adapter as the radio. In 2026 the same idea is rebuilt in about a day with Claude: Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and a text message that now travels the full loop and back. Includes the log4j error that wasn't a missing jar, and the phone-number format mismatch that made a registered customer look unregistered.">
 <meta name="author" content="niyid">
 <meta name="keywords" content="Cyclos, Kannel, mobile banking, SMS banking, SMS gateway, Android, Tomcat, PostgreSQL, PostGIS, Claude, Techducat">
 
 <!-- Open Graph -->
 <meta property="og:type" content="article">
 <meta property="og:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
-<meta property="og:description" content="A 2013 mobile-banking lab (Cyclos + Kannel + a MiFi modem) rebuilt in about a day with Claude: Cyclos 4.16, an Android phone as SMS gateway, and a small bridge. What was built, what broke, and what still isn't finished.">
+<meta property="og:description" content="A 2013 mobile-banking lab (Cyclos + Kannel + a MiFi modem) rebuilt in about a day with Claude: Cyclos 4.16, an Android phone as SMS gateway, and a small bridge — with a text message confirmed travelling the full loop and back. What was built, what broke twice, and what's still genuinely open.">
 <meta property="og:url" content="https://niyid.github.io/mobile-banking/linked-in-article.html">
 <meta property="og:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
 <meta property="og:image:width" content="1998">
@@ -21,12 +21,12 @@
 <meta property="og:image:alt" content="A hand holding a phone showing a mobile-banking app, between a Cyclos server and a Kannel SMS gateway.">
 <meta property="og:site_name" content="Techducat">
 <meta property="article:author" content="https://github.com/niyid">
-<meta property="article:published_time" content="2026-09-24">
+<meta property="article:published_time" content="2026-09-25">
 
 <!-- Twitter/X Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
-<meta name="twitter:description" content="Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and the log4j error that turned out not to be a missing jar.">
+<meta name="twitter:description" content="Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, a text message that made the full round trip, and the log4j error that turned out not to be a missing jar.">
 <meta name="twitter:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
 
 <!-- Canonical -->
@@ -289,7 +289,7 @@
       <span class="sep">·</span>
       <span>🛠 11 shell scripts + 1 Python service</span>
       <span class="sep">·</span>
-      <span>⏱ 11 min read</span>
+      <span>⏱ 13 min read</span>
     </div>
 
     <p class="hero-lead">
@@ -297,8 +297,8 @@
       MiFi USB adapter from Etisalat as the radio. Getting those three pieces to talk to each other took the
       better part of several months. This time the radio is an Android phone on a USB cable, the whole
       environment is a folder of re-runnable scripts plus one small Python service, and Claude wrote and
-      debugged them in a working session of about a day. This is what was built, what broke along the way,
-      and what is still not finished.
+      debugged them in a working session of about a day. This is what was built, what broke along the way
+      twice, and how a real text message finally made the whole round trip and back.
     </p>
   </header>
 
@@ -585,17 +585,126 @@
     </div>
   </section>
 
+  <!-- ═══ SECTION: WHAT BROKE, PART TWO ═══ -->
+  <section>
+    <div class="section-kicker red">What Broke, Part Two</div>
+    <h2>The Customer Who Looked Unregistered</h2>
+    <p>
+      With Cyclos running and the bridge healthy, the last mile was the admin UI: attach the SMS channel to a
+      real configuration, tell Cyclos how to read an inbound request, and prove a text could travel the whole
+      loop. Three separate things had to give before that was true, and each one looked, briefly, like the
+      previous fix hadn't worked.
+    </p>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">1</span>
+        <span class="theory-title">The channel just needs enabling</span>
+        <span class="verdict out">Half right</span>
+      </div>
+      <div class="theory-body">
+        <p>Creating a new "SMS operations" channel failed with <em>Name must be unique</em> and <em>Internal
+        name must be unique</em> — the channel already existed, just not attached to this network's own
+        configuration. It turned out to be visible one level down: <em>Configurations → Default for main →
+        Channels → SMS operations</em>, inherited from the system-wide Global default configuration rather
+        than something to recreate. Attaching it was never the missing step; finding where it already lived
+        was.</p>
+      </div>
+    </div>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">2</span>
+        <span class="theory-title">Two blank fields are the whole problem</span>
+        <span class="verdict out">Necessary, not sufficient</span>
+      </div>
+      <div class="theory-body">
+        <p>The channel's Inbound SMS panel has two required fields with no default: <strong>Mobile number
+        source</strong> and <strong>SMS message source</strong> — the names of the HTTP parameters Cyclos
+        should read the sender and the text from. The bridge's own webhook handler already names them plainly:</p>
+      </div>
+    </div>
+
+<pre><span class="c"># from bridge.py — what the bridge actually POSTs to Cyclos's Inbound SMS URL</span>
+FROM_PARAM = cfg(<span class="k">"CYCLOS_SMS_FROM_PARAM"</span>, <span class="k">"from"</span>)
+TEXT_PARAM = cfg(<span class="k">"CYCLOS_SMS_TEXT_PARAM"</span>, <span class="k">"text"</span>)
+params = {FROM_PARAM: sender, TEXT_PARAM: text}
+resp = requests.post(CYCLOS_URL, data=params, timeout=25)</pre>
+
+    <p>
+      Filling in <code>from</code> and <code>text</code> got Cyclos to correctly parse an inbound message and
+      recognise it as coming from an unrecognised number — real progress, and also a new, more specific
+      failure to chase.
+    </p>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">3</span>
+        <span class="theory-title">A registered number should stop looking unregistered</span>
+        <span class="verdict held">The fix that held</span>
+      </div>
+      <div class="theory-body">
+        <p>Registering the sending number against a real member didn't fix it. Cyclos's admin UI accepted
+        <code>+2349030906816</code> and immediately rewrote it to <code>09030906816</code> on save — a strong
+        hint that member numbers are matched in local format. The phone gateway app, meanwhile, reports every
+        inbound sender in international format. Two correct-looking numbers, two different shapes, matching
+        nothing. A four-line normaliser in the bridge closed the gap:</p>
+      </div>
+    </div>
+
+<pre><span class="c"># bridge.py</span>
+<span class="k">def</span> to_local_ng(number: <span class="k">str</span>) -> <span class="k">str</span>:
+    <span class="c"># Cyclos stores/matches member numbers in local format, so +234... /</span>
+    <span class="c"># 234... from the phone app has to become 0... before it reaches Cyclos.</span>
+    n = (number <span class="k">or</span> <span class="k">""</span>).strip().replace(<span class="k">" "</span>, <span class="k">""</span>)
+    <span class="k">if</span> n.startswith(<span class="k">"+234"</span>): <span class="k">return</span> <span class="k">"0"</span> + n[4:]
+    <span class="k">if</span> n.startswith(<span class="k">"234"</span>) <span class="k">and</span> len(n) > 10: <span class="k">return</span> <span class="k">"0"</span> + n[3:]
+    <span class="k">return</span> n</pre>
+
+    <p>
+      With the sender normalised before it ever reaches Cyclos's inbound URL, the registered test number
+      stopped being flagged as unrecognised and the reply began populating with a real recipient instead of an
+      empty one.
+    </p>
+
+    <div class="callout callout-good">
+      <span class="callout-icon">📲</span>
+      <div class="callout-body">
+        <strong>What the second debugging round actually showed</strong>
+        <p>None of these three were the bridge failing to talk to Cyclos, or Cyclos failing to talk to the
+        phone — the transport worked the whole time. Every failure was a data-shape mismatch: a channel in the
+        wrong place in the hierarchy, two unnamed parameters, and one phone number in two honest but
+        incompatible formats. The fixes are two lines of code and two form fields, not new infrastructure —
+        which is exactly why they were easy to miss and quick to close once actually found.</p>
+      </div>
+    </div>
+
+    <div class="callout callout-info">
+      <span class="callout-icon">🔁</span>
+      <div class="callout-body">
+        <strong>Two reliability gotchas, not wiring bugs</strong>
+        <p>Along the way, two environmental things intermittently looked like fresh regressions: the
+        <code>adb reverse</code> tunnel silently drops whenever the phone disconnects or sleeps, and Tomcat
+        itself can simply not be running when the bridge tries to forward a message (a plain
+        <code>Connection refused</code>, not a Cyclos error). Neither is a bug in the scripts — both are
+        answered by <code>./phone-tunnel.sh</code> and <code>./cyclosctl.sh start</code> respectively, and are
+        worth checking first whenever inbound SMS suddenly goes quiet.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ═══ SECTION: HOW THE DAY WENT ═══ -->
   <section>
     <div class="section-kicker forest">The Working Loop</div>
     <h2>How a Day Replaced Months</h2>
     <p>
       The division of labour was plain. I downloaded the Cyclos zip, plugged in and unlocked the phone, granted
-      the app its permissions, typed the licence credentials into the browser, ran each script, and pasted back
-      whatever it printed. Claude wrote the scripts, read the output, and proposed the next change. When
-      something failed, the fix went into the script and the stage was re-run, rather than being patched once
-      in a terminal and forgotten. The log4j episode above is the documented example: the two-line fix lives
-      in stage 10, so it applies on every future deploy.
+      the app its permissions, typed the licence credentials into the browser, clicked through the admin UI,
+      ran each script, and pasted back whatever it printed. Claude wrote the scripts, read the output, and
+      proposed the next change. When something failed, the fix went into the script or the bridge and the
+      stage was re-run, rather than being patched once in a terminal and forgotten. The log4j fix lives in
+      stage 10; the phone-number normaliser lives in the bridge itself. Both apply on every future run without
+      anyone having to remember them.
     </p>
     <p>
       The difference that lasts is the artifact. A lab assembled by hand lives on one machine and in one
@@ -608,18 +717,16 @@
   <section>
     <div class="section-kicker">Reported, Not Hidden</div>
     <h2>What This Doesn't Do Yet</h2>
-    <div class="callout callout-warn">
-      <span class="callout-icon">📨</span>
+    <div class="callout callout-good">
+      <span class="callout-icon">✅</span>
       <div class="callout-body">
-        <strong>SMS is not yet wired into Cyclos</strong>
-        <p>Cyclos 4's own SMS channel is configured in the admin UI under <em>System management, System
-        configuration, Configurations, Channels, SMS</em>. The outbound URL there should point at the bridge, and
-        the <strong>Inbound SMS URL</strong> Cyclos displays goes into <code>CYCLOS_SMS_RECEIVE_URL</code> in
-        the gateway settings. The repository's README says plainly that this step has not been tested against a
-        running 4.16.20 and that the parameter names must be checked against the reference manual shipped in the
-        distribution.</p>
-        <p>The bridge reports itself healthy and Cyclos is running, but this article does not claim a text has
-        travelled the whole loop, because that is exactly the part still open.</p>
+        <strong>SMS is wired into Cyclos, end to end</strong>
+        <p>Cyclos's SMS channel is attached under <em>System management, System configuration, Configurations,
+        Channels, SMS operations</em>, with <strong>Mobile number source</strong> and <strong>SMS message
+        source</strong> pointed at the bridge's <code>from</code>/<code>text</code> parameters, and the
+        <strong>Inbound SMS URL</strong> Cyclos displays copied into <code>CYCLOS_SMS_RECEIVE_URL</code> in the
+        gateway settings. A real text sent from a registered number now travels phone → bridge → Cyclos and
+        back, and <code>./35-verify-sms-wiring.sh</code> confirms both directions from the command line.</p>
       </div>
     </div>
     <div class="callout callout-warn">
@@ -671,12 +778,22 @@
 <span class="c"># phone gateway, bridge virtualenv, bridge service (stops before the git step)</span>
 ./run-all.sh --from 20 --until 30
 
-curl http://127.0.0.1:5000/health</pre>
+curl http://127.0.0.1:5000/health
+
+<span class="c"># outbound gateway (DB write + Tomcat restart), then paste in the Inbound SMS URL</span>
+./37-finish-sms-wiring.sh
+
+<span class="c"># in the admin UI: Configurations > your config > Channels > SMS operations,</span>
+<span class="c"># fill in Mobile number source = from, SMS message source = text, Save</span>
+
+./35-verify-sms-wiring.sh</pre>
     <p>
       Stage 50 is the author's own backup step: it commits into <code>~/git/mobile-banking</code> and pushes if
-      a remote is set, so stop at 30. If the
+      a remote is set, so stop at 30 if you don't want that. If the
       first Cyclos start fails halfway, <code>RESET_DB=1 ./10-install-cyclos.sh</code> drops and recreates the
-      database, and destroys any Cyclos data in it.
+      database, and destroys any Cyclos data in it. If a registered member's number still comes back
+      "unregistered" after all of that, check the format it's stored in against what the phone reports as the
+      sender — see "The Customer Who Looked Unregistered" above.
     </p>
   </section>
 
@@ -689,23 +806,26 @@ curl http://127.0.0.1:5000/health</pre>
       <div class="stat-box"><div class="stat-num">1,037</div><div class="stat-label">lines across 11 scripts and the bridge</div></div>
       <div class="stat-box"><div class="stat-num">372</div><div class="stat-label">jars in Cyclos's WEB-INF/lib</div></div>
       <div class="stat-box"><div class="stat-num">3</div><div class="stat-label">theories before the fix that held</div></div>
+      <div class="stat-box"><div class="stat-num">2</div><div class="stat-label">data-shape mismatches between a healthy bridge and a working reply</div></div>
     </div>
   </section>
 
   <!-- ═══ CONCLUSION ═══ -->
   <section>
     <div class="section-kicker">Conclusion</div>
-    <h2>The Scaffolding Is Done; the Banking Is Ahead</h2>
+    <h2>The Loop Closes; the Banking Is Ahead</h2>
     <p>
-      What took months in 2013 was getting a banking core, a gateway and a radio to speak to one another. That
-      part is now a repository that rebuilds it in one pass, and the pieces that failed along the way failed
-      loudly and were fixed in the scripts, not in someone's shell history.
+      What took months in 2013 was getting a banking core, a gateway and a radio to speak to one another, and
+      then proving a real text message would travel the whole loop and back. That part is now a repository
+      that rebuilds it in one pass, confirms itself with a script, and every failure along the way — a missing
+      class that wasn't missing, a channel hiding one level down, two unnamed parameters, a phone number in the
+      wrong format — failed loudly and was fixed once, in the scripts or the bridge, not in someone's shell
+      history.
     </p>
     <p>
-      What remains is the part that makes it banking rather than plumbing: wiring the bridge into Cyclos's SMS
-      channel and proving a message goes round the whole loop, then designing the products (account types,
-      payment flows, PIN handling), and deciding whether a USSD short code through an aggregator belongs in the
-      picture. Those are next, and they are the interesting half.
+      What remains is the part that makes it banking rather than plumbing: designing the products (account
+      types, payment flows, PIN handling), and deciding whether a USSD short code through an aggregator
+      belongs in the picture alongside SMS. Those are next, and they are the interesting half.
     </p>
   </section>
 

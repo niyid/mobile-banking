@@ -80,7 +80,7 @@ else
 fi
 
 echo
-if [[ "$OK" -eq 1 && -n "$HEALTH" && "$HEALTH" == *'"cyclos_inbound_url_configured":true'* ]]; then
+if [[ "$OK" -eq 1 && -n "$HEALTH" && "$HEALTH" == *'"cyclos_inbound_url_configured": true'* ]]; then
   echo "SMS channel appears fully wired: bridge is configured on both ends."
   echo "Send a real test message to the gateway phone number and watch: sudo journalctl -u cyclos-bridge -f"
 else
