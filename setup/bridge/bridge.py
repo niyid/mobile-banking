@@ -19,11 +19,22 @@ Settings come from environment variables, falling back to ~/.cyclos/phone-gatewa
   CYCLOS_SMS_METHOD / _FROM_PARAM / _TEXT_PARAM / _TO_PARAM     how inbound SMS is posted to Cyclos
   BRIDGE_HOST (default 127.0.0.1) / BRIDGE_PORT (default 5000)
 
+  PHONE_COUNTRY_CODE (default 234)          country code with no + or leading 0
+  CYCLOS_PHONE_FORMAT (default e164)        the shape Cyclos expects/stores numbers in:
+                                             e164   -> +234801234816
+                                             local0 -> 0801234816
+                                             plain  -> 234801234816  (country code, no +)
+                                             Run check-phone-format.sh against the Cyclos DB
+                                             to find out which one Cyclos actually uses before
+                                             trusting this in production.
+
 SMS bodies can contain PINs and payment details, so message text is never written to the log.
+Phone numbers are masked in logs (first 4 + last 3 digits) - see mask().
 """
 import hmac
 import logging
 import os
+import re
 from pathlib import Path
 
 import requests
@@ -70,6 +81,50 @@ CYCLOS_METHOD = cfg("CYCLOS_SMS_METHOD", "POST").upper()
 FROM_PARAM = cfg("CYCLOS_SMS_FROM_PARAM", "from")
 TEXT_PARAM = cfg("CYCLOS_SMS_TEXT_PARAM", "text")
 TO_PARAM = cfg("CYCLOS_SMS_TO_PARAM", "")  # empty = don't send a "to" parameter
+
+# --- phone number normalization ---------------------------------------------
+# Fixes the "registered member looks unregistered" bug: the phone app and
+# Cyclos can each report/expect a different shape (+234..., 0..., 234...),
+# so a byte-exact comparison in Cyclos silently fails even for real members.
+# Run check-phone-format.sh first to confirm which CYCLOS_PHONE_FORMAT is
+# actually correct for your Cyclos install - don't assume e164.
+COUNTRY_CODE = cfg("PHONE_COUNTRY_CODE", "234")
+CYCLOS_PHONE_FORMAT = cfg("CYCLOS_PHONE_FORMAT", "e164").lower()
+
+
+def normalize_phone(number: str, target: str = CYCLOS_PHONE_FORMAT, country_code: str = COUNTRY_CODE) -> str:
+    """Normalize a phone number to the shape Cyclos expects.
+
+    Accepts any of these common shapes as input:
+      0801234816      local, leading 0
+      801234816       local, no leading 0
+      234801234816    country code, no +
+      +234801234816   E.164
+
+    and emits one of:
+      target="e164"   -> +234801234816
+      target="local0" -> 0801234816
+      target="plain"  -> 234801234816
+    """
+    digits = re.sub(r"\D", "", number or "")
+    if not digits:
+        return ""
+
+    # Reduce to bare local subscriber number (no country code, no leading 0) first.
+    if digits.startswith(country_code):
+        local = digits[len(country_code):]
+    elif digits.startswith("0"):
+        local = digits[1:]
+    else:
+        local = digits
+
+    if target == "local0":
+        return "0" + local
+    if target == "plain":
+        return country_code + local
+    # default / anything else: e164
+    return "+" + country_code + local
+
 
 app = Flask(__name__)
 
@@ -125,10 +180,16 @@ def sendsms():
 
     raw_to = args.get("to") or ""
     # An unencoded '+' in a query string arrives as a space; restore it.
-    to = ("+" + raw_to.strip()) if raw_to.startswith(" ") else raw_to.strip()
+    raw_to = ("+" + raw_to.strip()) if raw_to.startswith(" ") else raw_to.strip()
+    # The phone app needs a dialable number regardless of how Cyclos stores/sends it,
+    # so always send it E.164 to the phone app, independent of CYCLOS_PHONE_FORMAT.
+    to = normalize_phone(raw_to, target="e164")
     text = args.get("text")
-    if not to or text is None:
+    if not raw_to or text is None:
         return Response("Missing 'to' or 'text'", status=400)
+
+    if raw_to != to:
+        log.info("Outbound 'to' normalized %s -> %s for phone app", mask(raw_to), mask(to))
 
     if not PHONE_USER or not PHONE_PASS:
         log.error("PHONE_GATEWAY_USER/PASS not set in %s", ENV_FILE)
@@ -153,8 +214,17 @@ def webhook():
 
     if event_type == "sms:received":
         payload = event.get("payload", {}) or {}
-        sender = payload.get("phoneNumber", "")
+        raw_sender = payload.get("phoneNumber", "")
+        # Normalize to whatever CYCLOS_PHONE_FORMAT says Cyclos expects - this is the
+        # fix for members being reported as "unregistered" due to a format mismatch
+        # between what the phone app reports and what Cyclos has on file.
+        sender = normalize_phone(raw_sender, target=CYCLOS_PHONE_FORMAT)
         text = payload.get("message", "")
+
+        log.info(
+            "Inbound sender normalized %s -> %s (target format: %s)",
+            mask(raw_sender), mask(sender), CYCLOS_PHONE_FORMAT,
+        )
 
         if not CYCLOS_URL:
             log.warning("Inbound SMS from %s NOT forwarded: CYCLOS_SMS_RECEIVE_URL is empty in %s",
@@ -170,6 +240,12 @@ def webhook():
             else:
                 resp = requests.post(CYCLOS_URL, data=params, timeout=10)
             log.info("Forwarded inbound SMS from %s to Cyclos: HTTP %s", mask(sender), resp.status_code)
+            if "unregistered" in resp.text.lower():
+                log.warning(
+                    "Cyclos still reports %s as unregistered after normalizing to '%s' format - "
+                    "run check-phone-format.sh and compare against the masked number above.",
+                    mask(sender), CYCLOS_PHONE_FORMAT,
+                )
         except requests.RequestException as exc:
             log.error("Forwarding inbound SMS to Cyclos failed: %s", exc)
             return jsonify({"status": "error", "forwarded": False}), 502
@@ -185,10 +261,14 @@ def health():
         "sendsms_configured": bool(SENDSMS_PASS),
         "phone_credentials_configured": bool(PHONE_USER and PHONE_PASS),
         "cyclos_inbound_url_configured": bool(CYCLOS_URL),
+        "phone_number_format_target": CYCLOS_PHONE_FORMAT,
+        "phone_country_code": COUNTRY_CODE,
     })
 
 
 if __name__ == "__main__":
     if not ENV_FILE.exists():
         log.warning("%s not found - run 20-setup-phone-gateway.sh first", ENV_FILE)
+    log.info("Phone number normalization target: CYCLOS_PHONE_FORMAT=%s, country code=%s",
+              CYCLOS_PHONE_FORMAT, COUNTRY_CODE)
     app.run(host=cfg("BRIDGE_HOST", "127.0.0.1"), port=int(cfg("BRIDGE_PORT", "5000")))

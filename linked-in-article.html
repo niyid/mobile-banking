@@ -6,14 +6,14 @@
 <title>Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable</title>
 
 <!-- SEO -->
-<meta name="description" content="In 2013 it took months to model mobile banking with Cyclos and Kannel, using an Etisalat MiFi USB adapter as the radio. In 2026 the same idea is rebuilt in about a day with Claude: Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and a text message that now travels the full loop and back. Includes the log4j error that wasn't a missing jar, and the phone-number format mismatch that made a registered customer look unregistered.">
+<meta name="description" content="In 2013 it took months to model mobile banking with Cyclos and Kannel, using an Etisalat MiFi USB adapter as the radio. In 2026 the same idea is rebuilt in about a day with Claude: Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, and a text message that now lands in Cyclos with status SUCCESS. Includes the log4j error that wasn't a missing jar, and the inbound SMS fields that looked filled in but were silently ignored until decompiling Cyclos's own class explained why.">
 <meta name="author" content="niyid">
 <meta name="keywords" content="Cyclos, Kannel, mobile banking, SMS banking, SMS gateway, Android, Tomcat, PostgreSQL, PostGIS, Claude, Techducat">
 
 <!-- Open Graph -->
 <meta property="og:type" content="article">
 <meta property="og:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
-<meta property="og:description" content="A 2013 mobile-banking lab (Cyclos + Kannel + a MiFi modem) rebuilt in about a day with Claude: Cyclos 4.16, an Android phone as SMS gateway, and a small bridge — with a text message confirmed travelling the full loop and back. What was built, what broke twice, and what's still genuinely open.">
+<meta property="og:description" content="A 2013 mobile-banking lab (Cyclos + Kannel + a MiFi modem) rebuilt in about a day with Claude: Cyclos 4.16, an Android phone as SMS gateway, and a small bridge — with a text message confirmed landing in Cyclos as status SUCCESS. What was built, what broke more than once, and what's still genuinely open.">
 <meta property="og:url" content="https://niyid.github.io/mobile-banking/linked-in-article.html">
 <meta property="og:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
 <meta property="og:image:width" content="1998">
@@ -26,7 +26,7 @@
 <!-- Twitter/X Card -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Mobile Banking, Rebuilt in a Day: Cyclos, Kannel, and a Phone on a Cable">
-<meta name="twitter:description" content="Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, a text message that made the full round trip, and the log4j error that turned out not to be a missing jar.">
+<meta name="twitter:description" content="Cyclos 4.16 on Tomcat 9, an Android phone as the SMS gateway, a small bridge service, a text message that finally landed as status SUCCESS, and the log4j error that turned out not to be a missing jar.">
 <meta name="twitter:image" content="https://niyid.github.io/mobile-banking/mobile_banking.png">
 
 <!-- Canonical -->
@@ -289,7 +289,7 @@
       <span class="sep">·</span>
       <span>🛠 11 shell scripts + 1 Python service</span>
       <span class="sep">·</span>
-      <span>⏱ 13 min read</span>
+      <span>⏱ 17 min read</span>
     </div>
 
     <p class="hero-lead">
@@ -297,8 +297,9 @@
       MiFi USB adapter from Etisalat as the radio. Getting those three pieces to talk to each other took the
       better part of several months. This time the radio is an Android phone on a USB cable, the whole
       environment is a folder of re-runnable scripts plus one small Python service, and Claude wrote and
-      debugged them in a working session of about a day. This is what was built, what broke along the way
-      twice, and how a real text message finally made the whole round trip and back.
+      debugged them in a working session of about a day. This is what was built, what broke along the way —
+      more than once, and not always loudly — and how a real text message finally made the whole round trip
+      and landed with status <code>SUCCESS</code>.
     </p>
   </header>
 
@@ -588,12 +589,12 @@
   <!-- ═══ SECTION: WHAT BROKE, PART TWO ═══ -->
   <section>
     <div class="section-kicker red">What Broke, Part Two</div>
-    <h2>The Customer Who Looked Unregistered</h2>
+    <h2>The Message Cyclos Never Actually Read</h2>
     <p>
       With Cyclos running and the bridge healthy, the last mile was the admin UI: attach the SMS channel to a
       real configuration, tell Cyclos how to read an inbound request, and prove a text could travel the whole
-      loop. Three separate things had to give before that was true, and each one looked, briefly, like the
-      previous fix hadn't worked.
+      loop. Four separate things had to give before that was true — and the first of them hid behind a
+      response that looked completely fine.
     </p>
 
     <div class="theory">
@@ -615,67 +616,106 @@
     <div class="theory">
       <div class="theory-head">
         <span class="theory-num">2</span>
-        <span class="theory-title">Two blank fields are the whole problem</span>
-        <span class="verdict out">Necessary, not sufficient</span>
+        <span class="theory-title">Filling in <code>from</code> and <code>text</code> is enough</span>
+        <span class="verdict out">Looked right, wasn't</span>
       </div>
       <div class="theory-body">
         <p>The channel's Inbound SMS panel has two required fields with no default: <strong>Mobile number
-        source</strong> and <strong>SMS message source</strong> — the names of the HTTP parameters Cyclos
-        should read the sender and the text from. The bridge's own webhook handler already names them plainly:</p>
+        source</strong> and <strong>SMS message source</strong>. The bridge's own webhook handler names its
+        parameters plainly as <code>from</code> and <code>text</code>, so those went straight into the form,
+        Cyclos accepted them with no validation error, and every test curl came back <code>200 OK</code>. It
+        looked done. It wasn't: every one of those "successful" requests landed in Cyclos's own
+        <code>inbound_sms</code> table with <code>phone_number</code> and <code>message</code> set to the
+        literal strings <code>from</code> and <code>text</code> — not the sender's number, not what was
+        actually sent. Real number, fake number, GET, POST, URL-encoded or not: identical wrong output every
+        time, which was itself the tell that nothing was reading the request at all.</p>
       </div>
     </div>
 
-<pre><span class="c"># from bridge.py — what the bridge actually POSTs to Cyclos's Inbound SMS URL</span>
-FROM_PARAM = cfg(<span class="k">"CYCLOS_SMS_FROM_PARAM"</span>, <span class="k">"from"</span>)
-TEXT_PARAM = cfg(<span class="k">"CYCLOS_SMS_TEXT_PARAM"</span>, <span class="k">"text"</span>)
-params = {FROM_PARAM: sender, TEXT_PARAM: text}
-resp = requests.post(CYCLOS_URL, data=params, timeout=25)</pre>
-
-    <p>
-      Filling in <code>from</code> and <code>text</code> got Cyclos to correctly parse an inbound message and
-      recognise it as coming from an unrecognised number — real progress, and also a new, more specific
-      failure to chase.
-    </p>
+    <div class="callout callout-info">
+      <span class="callout-icon">🔬</span>
+      <div class="callout-body">
+        <strong>Decompiling beats another round of guesses</strong>
+        <p>Two rounds of trial-and-error curl requests changed nothing. Cyclos ships as plain jars, not
+        obfuscated bytecode, so the faster path was pulling
+        <code>InboundSmsRequestHandlerImpl.class</code> straight out of
+        <code>cyclos4-impl-4.16.20.jar</code> and reading it with <code>javap</code>.</p>
+      </div>
+    </div>
 
     <div class="theory">
       <div class="theory-head">
         <span class="theory-num">3</span>
-        <span class="theory-title">A registered number should stop looking unregistered</span>
+        <span class="theory-title">These fields are templates, not parameter names</span>
         <span class="verdict held">The fix that held</span>
       </div>
       <div class="theory-body">
-        <p>Registering the sending number against a real member didn't fix it. Cyclos's admin UI accepted
-        <code>+2349030906816</code> and immediately rewrote it to <code>09030906816</code> on save — a strong
-        hint that member numbers are matched in local format. The phone gateway app, meanwhile, reports every
-        inbound sender in international format. Two correct-looking numbers, two different shapes, matching
-        nothing. A four-line normaliser in the bridge closed the gap:</p>
+        <p>The disassembled <code>processParameters()</code> method runs the configured field value through a
+        regex looking for <code>{…}</code> tokens, replaces only the matched tokens with the real request
+        parameter of that name, and copies everything else through byte-for-byte:</p>
       </div>
     </div>
 
-<pre><span class="c"># bridge.py</span>
-<span class="k">def</span> to_local_ng(number: <span class="k">str</span>) -> <span class="k">str</span>:
-    <span class="c"># Cyclos stores/matches member numbers in local format, so +234... /</span>
-    <span class="c"># 234... from the phone app has to become 0... before it reaches Cyclos.</span>
-    n = (number <span class="k">or</span> <span class="k">""</span>).strip().replace(<span class="k">" "</span>, <span class="k">""</span>)
-    <span class="k">if</span> n.startswith(<span class="k">"+234"</span>): <span class="k">return</span> <span class="k">"0"</span> + n[4:]
-    <span class="k">if</span> n.startswith(<span class="k">"234"</span>) <span class="k">and</span> len(n) > 10: <span class="k">return</span> <span class="k">"0"</span> + n[3:]
-    <span class="k">return</span> n</pre>
+<pre><span class="c">// InboundSmsRequestHandlerImpl.processParameters(), decompiled with javap -c</span>
+<span class="c">// PARAM_PATTERN matches {...} tokens in the configured field value</span>
+matcher.group(1) → StringHelper.removeStart("{") → StringHelper.removeEnd("}")
+  <span class="k">// only the {token} is looked up:</span>
+  <span class="k">requestInfo.getParameter(token)</span>
+<span class="c">// anything NOT matched by the pattern is copied through unchanged via appendTail()</span></pre>
 
     <p>
-      With the sender normalised before it ever reaches Cyclos's inbound URL, the registered test number
-      stopped being flagged as unrecognised and the reply began populating with a real recipient instead of an
-      empty one.
+      A bare <code>from</code>, with no braces, matches the pattern nowhere — so the whole string passes
+      through unchanged on every single request, regardless of what the request actually contains. Cyclos's
+      own wiki examples write these fields as <code>{number}</code> and <code>{message}</code>; that turned out
+      to be exact required syntax, not documentation shorthand. Changing the two fields to <code>{from}</code>
+      and <code>{text}</code> was the actual fix — confirmed straight from the database, then confirmed again
+      by curl, with a real phone number and message finally landing correctly in <code>inbound_sms</code>.
+    </p>
+
+    <div class="theory">
+      <div class="theory-head">
+        <span class="theory-num">4</span>
+        <span class="theory-title">Fixing the parser reveals what it was hiding</span>
+        <span class="verdict held">Two more fixes, same shape</span>
+      </div>
+      <div class="theory-body">
+        <p>With <code>{from}</code> and <code>{text}</code> in place, the same real number and message
+        finally parsed correctly — and immediately hit two new, genuinely different blockers, one after the
+        other, both of which had been sitting there the entire time, invisible behind the parsing bug because
+        nothing had ever gotten far enough to reach them. First, <code>INVALID_OPERATION</code>: not a wrong
+        alias, but zero rows in <code>sms_operation_configurations</code> — no SMS operation had ever been
+        added for this channel. Adding an <em>Account info</em> operation with alias <code>acinfo</code> fixed
+        that. Second, <code>INACCESSIBLE_CHANNEL</code>: the channel's own <strong>User access</strong> setting
+        is "disabled by default, user can enable it," and the test member had never opted in — confirmed by an
+        empty <code>user_channels</code> row for that user and channel. A row inserted directly unblocked
+        testing; for real users, <strong>User access</strong> needs to be switched to enabled-by-default, or
+        the onboarding flow needs to prompt users to opt in themselves.</p>
+      </div>
+    </div>
+
+    <p>
+      With a real operation configured and channel access granted, the same request that had returned
+      <code>OK</code>-but-wrong dozens of times finally produced <code>status = SUCCESS</code> in
+      <code>inbound_sms</code>, with the real phone number, the real message, correctly parsed and routed to a
+      real operation. The earlier theory that a registered member's number was stored in a different shape
+      than the phone reports it did not reproduce here: this member's <code>raw_number</code> and
+      <code>normalized_number</code> were both already <code>+2349030906816</code>, matching the international
+      format unmodified. The bridge's local-number normaliser may still matter for other records or a
+      differently-configured deployment, but it wasn't the blocker this time — and whether it's still needed on
+      the live phone → bridge path, rather than a direct curl to Cyclos, is now an open question, not an
+      assumption.
     </p>
 
     <div class="callout callout-good">
       <span class="callout-icon">📲</span>
       <div class="callout-body">
         <strong>What the second debugging round actually showed</strong>
-        <p>None of these three were the bridge failing to talk to Cyclos, or Cyclos failing to talk to the
-        phone — the transport worked the whole time. Every failure was a data-shape mismatch: a channel in the
-        wrong place in the hierarchy, two unnamed parameters, and one phone number in two honest but
-        incompatible formats. The fixes are two lines of code and two form fields, not new infrastructure —
-        which is exactly why they were easy to miss and quick to close once actually found.</p>
+        <p>None of the four were the bridge failing to talk to Cyclos, or Cyclos failing to talk to the phone —
+        the transport worked the whole time. The real story is that a config field can save without any error
+        and still be silently ignored, and a request can return <code>200 OK</code> and still have done
+        nothing useful. Three of the four fixes are a form field and two admin-UI entries, not new
+        infrastructure — which is exactly why they were invisible until the database was checked directly, and
+        why the one bug worth reading code for was worth reading code for.</p>
       </div>
     </div>
 
@@ -720,13 +760,16 @@ resp = requests.post(CYCLOS_URL, data=params, timeout=25)</pre>
     <div class="callout callout-good">
       <span class="callout-icon">✅</span>
       <div class="callout-body">
-        <strong>SMS is wired into Cyclos, end to end</strong>
+        <strong>SMS is wired into Cyclos, confirmed by database, not by a green checkmark</strong>
         <p>Cyclos's SMS channel is attached under <em>System management, System configuration, Configurations,
         Channels, SMS operations</em>, with <strong>Mobile number source</strong> and <strong>SMS message
-        source</strong> pointed at the bridge's <code>from</code>/<code>text</code> parameters, and the
-        <strong>Inbound SMS URL</strong> Cyclos displays copied into <code>CYCLOS_SMS_RECEIVE_URL</code> in the
-        gateway settings. A real text sent from a registered number now travels phone → bridge → Cyclos and
-        back, and <code>./35-verify-sms-wiring.sh</code> confirms both directions from the command line.</p>
+        source</strong> set to <code>{from}</code> and <code>{text}</code> — curly braces required, they're
+        template syntax, not bare parameter names — at least one SMS operation added, and the test member
+        granted access to the channel. With all three in place, a direct request to the <strong>Inbound SMS
+        URL</strong> with a real phone number now lands in Cyclos's own <code>inbound_sms</code> table with
+        <code>status = SUCCESS</code>, phone number and message intact. Still open: re-confirming the same
+        result over the real phone → bridge → Cyclos path rather than a direct curl, and settling whether the
+        bridge's local-number normaliser is actually needed for this member's number format.</p>
       </div>
     </div>
     <div class="callout callout-warn">
@@ -784,16 +827,24 @@ curl http://127.0.0.1:5000/health
 ./37-finish-sms-wiring.sh
 
 <span class="c"># in the admin UI: Configurations > your config > Channels > SMS operations,</span>
-<span class="c"># fill in Mobile number source = from, SMS message source = text, Save</span>
+<span class="c"># fill in Mobile number source = {from}, SMS message source = {text} —</span>
+<span class="c"># braces are required, they're template syntax, not literal parameter names.</span>
+<span class="c"># Then add at least one SMS operation (e.g. alias "acinfo"), and make sure</span>
+<span class="c"># the test member has access to the channel (user_channels, or set User</span>
+<span class="c"># access to "enabled by default") — skip either and you'll hit</span>
+<span class="c"># INVALID_OPERATION or INACCESSIBLE_CHANNEL even with the fields right.</span>
 
 ./35-verify-sms-wiring.sh</pre>
     <p>
       Stage 50 is the author's own backup step: it commits into <code>~/git/mobile-banking</code> and pushes if
       a remote is set, so stop at 30 if you don't want that. If the
       first Cyclos start fails halfway, <code>RESET_DB=1 ./10-install-cyclos.sh</code> drops and recreates the
-      database, and destroys any Cyclos data in it. If a registered member's number still comes back
-      "unregistered" after all of that, check the format it's stored in against what the phone reports as the
-      sender — see "The Customer Who Looked Unregistered" above.
+      database, and destroys any Cyclos data in it. A <code>200 OK</code> from the Inbound SMS URL is not proof
+      anything was read correctly — check <code>inbound_sms</code> in the database directly. If it shows the
+      literal strings <code>from</code>/<code>text</code> instead of real values, the source fields are missing
+      their braces; if it shows <code>INVALID_OPERATION</code>, check that an operation actually exists under
+      SMS operations; if it shows <code>INACCESSIBLE_CHANNEL</code>, check <code>user_channels</code> for that
+      member. See "The Message Cyclos Never Actually Read" above for all three.
     </p>
   </section>
 
@@ -805,8 +856,8 @@ curl http://127.0.0.1:5000/health
       <div class="stat-box"><div class="stat-num">~1 day</div><div class="stat-label">to rebuild what took months in 2013</div></div>
       <div class="stat-box"><div class="stat-num">1,037</div><div class="stat-label">lines across 11 scripts and the bridge</div></div>
       <div class="stat-box"><div class="stat-num">372</div><div class="stat-label">jars in Cyclos's WEB-INF/lib</div></div>
-      <div class="stat-box"><div class="stat-num">3</div><div class="stat-label">theories before the fix that held</div></div>
-      <div class="stat-box"><div class="stat-num">2</div><div class="stat-label">data-shape mismatches between a healthy bridge and a working reply</div></div>
+      <div class="stat-box"><div class="stat-num">1</div><div class="stat-label">decompiled class that found the real bug, after two rounds of guessing didn't</div></div>
+      <div class="stat-box"><div class="stat-num">4</div><div class="stat-label">blockers stacked behind a single silent "200 OK"</div></div>
     </div>
   </section>
 
@@ -816,11 +867,13 @@ curl http://127.0.0.1:5000/health
     <h2>The Loop Closes; the Banking Is Ahead</h2>
     <p>
       What took months in 2013 was getting a banking core, a gateway and a radio to speak to one another, and
-      then proving a real text message would travel the whole loop and back. That part is now a repository
-      that rebuilds it in one pass, confirms itself with a script, and every failure along the way — a missing
-      class that wasn't missing, a channel hiding one level down, two unnamed parameters, a phone number in the
-      wrong format — failed loudly and was fixed once, in the scripts or the bridge, not in someone's shell
-      history.
+      then proving a real text message would travel the whole loop and land with a real, verified
+      <code>SUCCESS</code>. That part is now a repository that rebuilds it in one pass and confirms itself with
+      a script. Along the way, most failures were loud — a missing class that wasn't missing, a channel hiding
+      one level down. The worst one wasn't: two form fields that saved without complaint and were silently
+      ignored on every request, discovered only by reading the exact method Cyclos itself runs. Each was fixed
+      once, in the scripts, the bridge, or a single decompiled class, not in someone's shell history — and the
+      quiet ones are the reminder that a <code>200 OK</code> is a claim, not proof.
     </p>
     <p>
       What remains is the part that makes it banking rather than plumbing: designing the products (account

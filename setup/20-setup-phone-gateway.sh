@@ -54,6 +54,8 @@ env_default "$GATEWAY_ENV" CYCLOS_SMS_RECEIVE_URL ""
 env_default "$GATEWAY_ENV" CYCLOS_SMS_METHOD "POST"
 env_default "$GATEWAY_ENV" CYCLOS_SMS_FROM_PARAM "from"
 env_default "$GATEWAY_ENV" CYCLOS_SMS_TEXT_PARAM "text"
+env_default "$GATEWAY_ENV" PHONE_COUNTRY_CODE "234"
+env_default "$GATEWAY_ENV" CYCLOS_PHONE_FORMAT "e164"   # set from ./check-phone-format.sh's output once Cyclos is up: e164 | local0 | plain
 
 if [[ -n "$P_USER" && -n "$P_PASS" ]]; then
   log "Trying to register the inbound-SMS webhook in the phone app (best effort)"
