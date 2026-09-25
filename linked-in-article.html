@@ -295,8 +295,9 @@
     <p class="hero-lead">
       In 2013 I modelled mobile banking with Cyclos as the banking core and Kannel as the SMS gateway, with a
       MiFi USB adapter from Etisalat as the radio. Getting those three pieces to talk to each other took the
-      better part of several months. This time the radio is an Android phone on a USB cable, the whole
-      environment is a folder of re-runnable scripts plus one small Python service, and Claude wrote and
+      better part of several months. This time the radio is an Android phone on a USB cable, running
+      <a href="https://github.com/capcom6/android-sms-gateway/releases/tag/v1.76.0" target="_blank" rel="noopener"><strong>SMS Gateway for Android</strong> v1.76.0</a>,
+      the whole environment is a folder of re-runnable scripts plus one small Python service, and Claude wrote and
       debugged them in a working session of about a day. This is what was built, what broke along the way —
       more than once, and not always loudly — and how a real text message finally made the whole round trip
       and landed with status <code>SUCCESS</code>.
@@ -327,7 +328,7 @@
       <div class="compare-row">
         <div class="compare-cell dim-label">SMS radio</div>
         <div class="compare-cell" data-label="2013 lab"><strong>MiFi USB adapter</strong> from Etisalat</div>
-        <div class="compare-cell" data-label="2026 lab"><strong>Android phone</strong> on a USB cable, running the open-source SMS Gateway for Android app</div>
+        <div class="compare-cell" data-label="2026 lab"><strong>Android phone</strong> on a USB cable, running <a href="https://github.com/capcom6/android-sms-gateway/releases/tag/v1.76.0" target="_blank" rel="noopener">SMS Gateway for Android v1.76.0</a></div>
       </div>
       <div class="compare-row">
         <div class="compare-cell dim-label">Gateway</div>
@@ -378,7 +379,7 @@
       <span class="flow-arrow">→</span>
       <div class="flow-node">adb tunnel<small>USB · 18080 ⇄ 8081</small></div>
       <span class="flow-arrow">→</span>
-      <div class="flow-node phone">Phone<small>SMS Gateway app</small></div>
+      <div class="flow-node phone">Phone<small>SMS Gateway for Android v1.76.0</small></div>
       <span class="flow-arrow">→</span>
       <div class="flow-node">Carrier<small>customer's phone</small></div>
     </div>
@@ -470,11 +471,12 @@
 
     <h3>Stages 20 and 30: A phone as the gateway</h3>
     <p>
-      On the phone, the open-source <em>SMS Gateway for Android</em> app runs in local-server mode and shows a
-      username and password. Stage 20 walks through enabling USB debugging, sets up the two adb tunnels, checks
-      the phone app answers through them, and saves the credentials to <code>~/.cyclos/phone-gateway.env</code>.
-      It also generates a separate password that Cyclos must present to the bridge, and tries to register the
-      inbound-SMS webhook in the app automatically.
+      On the phone, <a href="https://github.com/capcom6/android-sms-gateway/releases/tag/v1.76.0" target="_blank" rel="noopener"><em>SMS Gateway for Android</em>, v1.76.0</a> — the open-source app from
+      <a href="https://github.com/capcom6/android-sms-gateway" target="_blank" rel="noopener">capcom6/android-sms-gateway</a> —
+      runs in local-server mode and shows a username and password. Stage 20 walks through enabling USB debugging,
+      sets up the two adb tunnels, checks the phone app answers through them, and saves the credentials to
+      <code>~/.cyclos/phone-gateway.env</code>. It also generates a separate password that Cyclos must present
+      to the bridge, and tries to register the inbound-SMS webhook in the app automatically.
     </p>
     <p>
       The bridge is a Flask app of about 180 lines, and most of its size is defensive:
@@ -886,12 +888,12 @@ curl http://127.0.0.1:5000/health
   <footer class="article-footer">
     <div class="footer-left">
       <p>Every step in this article comes from the scripts and README in the repository, and from the actual setup session.</p>
-      <p>github.com/niyid/mobile-banking · Cyclos 4.16.20 · Tomcat 9 · PostgreSQL + PostGIS · Java 17 · Python + Flask</p>
+      <p>github.com/niyid/mobile-banking · Cyclos 4.16.20 · Tomcat 9 · PostgreSQL + PostGIS · Java 17 · Python + Flask · SMS Gateway for Android v1.76.0</p>
     </div>
     <div class="footer-links">
       <a class="footer-link" href="https://github.com/niyid/mobile-banking" target="_blank" rel="noopener">🏦 mobile-banking →</a>
       <a class="footer-link" href="https://github.com/niyid/mobile-banking/blob/main/setup/README.md" target="_blank" rel="noopener">📄 setup README →</a>
-      <a class="footer-link" href="https://github.com/capcom6/android-sms-gateway" target="_blank" rel="noopener">📱 SMS Gateway for Android →</a>
+      <a class="footer-link" href="https://github.com/capcom6/android-sms-gateway/releases/tag/v1.76.0" target="_blank" rel="noopener">📱 SMS Gateway for Android v1.76.0 →</a>
       <a class="footer-link" href="https://www.kannel.org" target="_blank" rel="noopener">📡 Kannel →</a>
     </div>
   </footer>
